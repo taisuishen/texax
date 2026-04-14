@@ -3,7 +3,6 @@
 管理一桌游戏的完整生命周期
 """
 import asyncio
-import time
 import logging
 from enum import Enum
 from dataclasses import dataclass, field
@@ -23,10 +22,10 @@ class GamePhase(str, Enum):
 
 
 class PlayerStatus(str, Enum):
-    SITTING = "sitting"        # 坐下但没参与当前手牌
-    ACTIVE = "active"          # 参与当前手牌
-    FOLDED = "folded"          # 已弃牌
-    ALL_IN = "all_in"          # 全押
+    SITTING = "sitting"
+    ACTIVE = "active"
+    FOLDED = "folded"
+    ALL_IN = "all_in"
 
 
 @dataclass
@@ -37,8 +36,8 @@ class Player:
     chips: int = 0
     hole_cards: list[Card] = field(default_factory=list)
     status: PlayerStatus = PlayerStatus.SITTING
-    current_bet: int = 0       # 当前下注轮的下注额
-    total_bet: int = 0         # 本手牌总下注
+    current_bet: int = 0
+    total_bet: int = 0
     is_ready: bool = False
     last_action: str = ""
     last_action_amount: int = 0
@@ -74,15 +73,15 @@ class Player:
 @dataclass
 class PotInfo:
     amount: int
-    eligible_players: list[str]  # user_ids
+    eligible_players: list[str]
 
 
 class GameEngine:
     """单桌德州扑克游戏引擎"""
 
     def __init__(self, broadcast_callback=None):
-        self.players: dict[str, Player] = {}  # user_id -> Player
-        self.seats: dict[int, str] = {}       # seat_number -> user_id
+        self.players: dict[str, Player] = {}
+        self.seats: dict[int, str] = {}
 
         self.deck = Deck()
         self.community_cards: list[Card] = []
@@ -100,11 +99,15 @@ class GameEngine:
         self.turn_timeout = 30
         self.max_players = 9
 
-        self.current_bet = 0  # 当前轮最高下注
-        self.min_raise = 0    # 最小加注额
+        self.current_bet = 0
+        self.min_raise = 0
+
+        # ★ 核心: 用集合追踪还需要行动的玩家座位号
+        self._players_to_act: set[int] = set()
 
         self._turn_timer_task: asyncio.Task | None = None
         self._broadcast = broadcast_callback
+        self._action_lock = asyncio.Lock()
 
         self.hand_number = 0
         self.last_hand_results: list | None = None
@@ -124,7 +127,6 @@ class GameEngine:
             return False
         if user_id in self.players:
             return False
-
         player = Player(user_id=user_id, username=username, seat=seat, chips=chips)
         self.players[user_id] = player
         self.seats[seat] = user_id
@@ -136,7 +138,7 @@ class GameEngine:
         if self.phase != GamePhase.WAITING:
             player = self.players[user_id]
             if player.status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN):
-                return False  # 游戏进行中不能离开
+                return False
         player = self.players[user_id]
         del self.seats[player.seat]
         del self.players[user_id]
@@ -146,23 +148,16 @@ class GameEngine:
         return self.players.get(user_id)
 
     def _get_active_seats(self) -> list[int]:
-        """获取所有参与当前手牌的座位号 (按座位号排序)"""
-        seats = []
-        for uid, p in self.players.items():
-            if p.status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN):
-                seats.append(p.seat)
-        return sorted(seats)
+        """参与当前手牌的座位 (ACTIVE + ALL_IN)"""
+        return sorted(s for uid, p in self.players.items()
+                       for s in [p.seat] if p.status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN))
 
     def _get_acting_seats(self) -> list[int]:
-        """获取所有还能行动的座位号 (未弃牌且未全押)"""
-        seats = []
-        for uid, p in self.players.items():
-            if p.status == PlayerStatus.ACTIVE:
-                seats.append(p.seat)
-        return sorted(seats)
+        """还能行动的座位 (仅ACTIVE, 排除 ALL_IN 和 FOLDED)"""
+        return sorted(p.seat for p in self.players.values() if p.status == PlayerStatus.ACTIVE)
 
     def _next_seat(self, current_seat: int, seat_list: list[int]) -> int:
-        """在给定座位列表中找到下一个座位"""
+        """在座位列表中找 current_seat 之后的下一个座位 (环形)"""
         if not seat_list:
             return -1
         for s in seat_list:
@@ -170,34 +165,45 @@ class GameEngine:
                 return s
         return seat_list[0]
 
+    def _next_to_act(self) -> int:
+        """找到下一个需要行动的座位, 从 current_player_seat 的下一位开始找"""
+        acting = self._get_acting_seats()
+        # 只看还在 _players_to_act 里的
+        candidates = sorted(s for s in acting if s in self._players_to_act)
+        if not candidates:
+            return -1
+        # 从当前座位之后找
+        for s in candidates:
+            if s > self.current_player_seat:
+                return s
+        return candidates[0]
+
     # ─── 游戏流程 ───
 
     async def try_start_game(self) -> bool:
-        """尝试开始新一局"""
         if self.phase != GamePhase.WAITING:
             return False
-
         ready_players = [p for p in self.players.values() if p.is_ready and p.chips > 0]
         if len(ready_players) < 2:
             return False
-
         await self._start_hand(ready_players)
         return True
 
     async def _start_hand(self, participants: list[Player]):
-        """开始一手牌"""
         self.hand_number += 1
         self.deck.reset()
         self.community_cards = []
         self.pots = []
         self.main_pot = 0
         self.last_hand_results = None
+        self._players_to_act.clear()
 
         for p in participants:
             p.reset_for_hand()
 
-        # 移动庄家按钮
         active_seats = sorted([p.seat for p in participants])
+
+        # 移动庄家按钮
         if self.dealer_seat == -1:
             self.dealer_seat = active_seats[0]
         else:
@@ -205,7 +211,6 @@ class GameEngine:
 
         # 确定大小盲位
         if len(active_seats) == 2:
-            # 两人时，庄家=小盲
             self.small_blind_seat = self.dealer_seat
             self.big_blind_seat = self._next_seat(self.dealer_seat, active_seats)
         else:
@@ -222,19 +227,27 @@ class GameEngine:
         for p in participants:
             p.hole_cards = self.deck.deal(2)
 
-        # 设置翻前状态
+        # 翻前状态
         self.phase = GamePhase.PRE_FLOP
         self.current_bet = self.big_blind
         self.min_raise = self.big_blind
 
-        # 翻前从大盲的下一位开始
-        self.current_player_seat = self._next_seat(self.big_blind_seat, self._get_acting_seats())
+        # ★ 翻前: 所有能行动的人都需要行动 (包括大盲, 大盲有option)
+        acting = self._get_acting_seats()
+        self._players_to_act = set(acting)
+
+        # 翻前从大盲下一位开始
+        first = self._next_seat(self.big_blind_seat, acting)
+        self.current_player_seat = first
+
+        logger.info(f"Hand #{self.hand_number} started. Dealer={self.dealer_seat} "
+                    f"SB={self.small_blind_seat} BB={self.big_blind_seat} "
+                    f"First={first} ToAct={self._players_to_act}")
 
         await self._broadcast_state("hand_start")
         await self._start_turn_timer()
 
     def _place_bet(self, player: Player, amount: int):
-        """玩家下注"""
         actual = min(amount, player.chips)
         player.chips -= actual
         player.current_bet += actual
@@ -245,11 +258,14 @@ class GameEngine:
         return actual
 
     async def player_action(self, user_id: str, action: str, amount: int = 0) -> dict:
-        """处理玩家行动"""
+        async with self._action_lock:
+            return await self._do_player_action(user_id, action, amount)
+
+    async def _do_player_action(self, user_id: str, action: str, amount: int = 0) -> dict:
         player = self.players.get(user_id)
         if not player:
             return {"ok": False, "error": "你不在桌上"}
-        if self.phase == GamePhase.WAITING or self.phase == GamePhase.SHOWDOWN:
+        if self.phase in (GamePhase.WAITING, GamePhase.SHOWDOWN):
             return {"ok": False, "error": "当前不是行动阶段"}
         if player.seat != self.current_player_seat:
             return {"ok": False, "error": "还没轮到你"}
@@ -259,6 +275,7 @@ class GameEngine:
         self._cancel_turn_timer()
 
         call_amount = self.current_bet - player.current_bet
+        did_raise = False
 
         if action == "fold":
             player.status = PlayerStatus.FOLDED
@@ -281,19 +298,16 @@ class GameEngine:
         elif action == "raise":
             if amount < self.current_bet + self.min_raise and amount < player.chips + player.current_bet:
                 return {"ok": False, "error": f"加注至少为 {self.current_bet + self.min_raise}"}
-            raise_to = amount
-            bet_needed = raise_to - player.current_bet
+            bet_needed = amount - player.current_bet
             if bet_needed >= player.chips:
-                # 全押
                 actual = self._place_bet(player, player.chips)
-                new_total = player.current_bet
             else:
                 actual = self._place_bet(player, bet_needed)
-                new_total = player.current_bet
 
-            if new_total > self.current_bet:
-                self.min_raise = new_total - self.current_bet
-                self.current_bet = new_total
+            if player.current_bet > self.current_bet:
+                self.min_raise = player.current_bet - self.current_bet
+                self.current_bet = player.current_bet
+                did_raise = True
 
             player.last_action = "加注" if player.status != PlayerStatus.ALL_IN else "全押"
             player.last_action_amount = actual
@@ -303,25 +317,36 @@ class GameEngine:
             if player.current_bet > self.current_bet:
                 self.min_raise = max(self.min_raise, player.current_bet - self.current_bet)
                 self.current_bet = player.current_bet
+                did_raise = True
             player.last_action = "全押"
             player.last_action_amount = actual
 
         else:
             return {"ok": False, "error": f"未知行动: {action}"}
 
-        await self._broadcast_state("player_action")
+        # ★ 从待行动集合中移除当前玩家
+        self._players_to_act.discard(player.seat)
 
-        # 检查是否需要进入下一阶段
+        # ★ 如果加注了, 其他所有还能行动的人都需要重新行动
+        if did_raise:
+            acting = self._get_acting_seats()
+            self._players_to_act = set(acting)
+            self._players_to_act.discard(player.seat)  # 加注者自己不用再行动
+
+        logger.info(f"Player {player.username}(seat {player.seat}) action={action} "
+                    f"amount={amount} did_raise={did_raise} "
+                    f"remaining_to_act={self._players_to_act}")
+
+        await self._broadcast_state("player_action")
         await self._advance_game()
 
         return {"ok": True, "action": action}
 
     async def _advance_game(self):
-        """推进游戏状态"""
         active_seats = self._get_active_seats()
         acting_seats = self._get_acting_seats()
 
-        # 只剩一人，直接获胜
+        # 只剩一人 → 直接获胜
         if len(active_seats) == 1:
             winner_uid = self.seats[active_seats[0]]
             winner = self.players[winner_uid]
@@ -339,57 +364,35 @@ class GameEngine:
             await self._reset_for_next_hand()
             return
 
-        # 检查当前下注轮是否结束
-        if self._is_betting_round_complete():
+        # ★ 只看还在 _players_to_act 中且仍 ACTIVE 的座位
+        remaining = set(s for s in self._players_to_act if s in set(acting_seats))
+        self._players_to_act = remaining
+
+        if not remaining:
+            # 当前下注轮结束 → 进入下一阶段
+            logger.info(f"Betting round complete in phase {self.phase.value}, advancing...")
             await self._next_phase()
         else:
-            # 移到下一位玩家
-            self.current_player_seat = self._next_seat(self.current_player_seat, acting_seats)
+            # 移到下一个需要行动的人
+            next_s = self._next_to_act()
+            if next_s == -1:
+                # 不应该发生, 保险
+                await self._next_phase()
+                return
+            self.current_player_seat = next_s
+            logger.info(f"Next to act: seat {next_s}, remaining={remaining}")
+            await self._broadcast_state("next_turn")
             await self._start_turn_timer()
 
-    def _is_betting_round_complete(self) -> bool:
-        """检查当前下注轮是否结束"""
-        acting_seats = self._get_acting_seats()
-        if not acting_seats:
-            return True  # 所有人都all-in或弃牌
-
-        for seat in acting_seats:
-            uid = self.seats[seat]
-            p = self.players[uid]
-            if p.current_bet < self.current_bet:
-                return False
-            if not p.last_action and self.phase != GamePhase.PRE_FLOP:
-                return False
-            # 翻前: 大盲有权再行动
-            if self.phase == GamePhase.PRE_FLOP:
-                if seat == self.big_blind_seat and not p.last_action:
-                    return False
-
-        # 确认下一个该行动的人不是还没行动过的
-        next_seat = self._next_seat(self.current_player_seat, acting_seats)
-        if next_seat != -1:
-            next_uid = self.seats[next_seat]
-            next_p = self.players[next_uid]
-            if next_p.current_bet < self.current_bet:
-                return False
-            if not next_p.last_action:
-                if self.phase != GamePhase.PRE_FLOP:
-                    return False
-                if next_seat == self.big_blind_seat:
-                    return False
-
-        return True
-
     async def _next_phase(self):
-        """进入下一阶段"""
-        # 重置下注状态
+        # 重置所有人的下注轮状态
         for p in self.players.values():
             if p.status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN):
                 p.current_bet = 0
                 p.last_action = ""
         self.current_bet = 0
-
-        acting_seats = self._get_acting_seats()
+        self.min_raise = self.big_blind
+        self._players_to_act.clear()
 
         if self.phase == GamePhase.PRE_FLOP:
             self.phase = GamePhase.FLOP
@@ -404,33 +407,39 @@ class GameEngine:
             await self._showdown()
             return
 
-        await self._broadcast_state("new_phase")
+        acting_seats = self._get_acting_seats()
 
-        # 如果没有可以行动的玩家了 (全都all-in), 直接发完公共牌
+        # 所有人都all-in了 → 直接跳到下一阶段发牌
         if len(acting_seats) <= 1:
+            await self._broadcast_state("new_phase")
             await asyncio.sleep(1)
             await self._next_phase()
             return
 
+        # ★ 新一轮: 所有能行动的人都需要行动
+        self._players_to_act = set(acting_seats)
+
         # 从庄家下一位开始
-        active_seats = self._get_active_seats()
-        self.current_player_seat = self._next_seat(self.dealer_seat, acting_seats)
+        first = self._next_seat(self.dealer_seat, acting_seats)
+        self.current_player_seat = first
+
+        logger.info(f"New phase: {self.phase.value} first_to_act={first} to_act={self._players_to_act}")
+
+        await self._broadcast_state("new_phase")
         await self._start_turn_timer()
 
     async def _showdown(self):
-        """摊牌阶段"""
         self.phase = GamePhase.SHOWDOWN
+        self.current_player_seat = -1
         active_players = [p for p in self.players.values()
                           if p.status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN)]
 
-        # 计算边池
         pots = self._calculate_pots()
 
         self.last_hand_results = []
         total_awarded = {}
 
         for pot_amount, eligible_uids in pots:
-            # 评估这个池子里每个人的牌力
             hands = []
             for uid in eligible_uids:
                 p = self.players[uid]
@@ -438,11 +447,8 @@ class GameEngine:
                 result = evaluate(all_cards)
                 hands.append((uid, result))
 
-            # 找到最好的手牌
             hands.sort(key=lambda x: x[1].score, reverse=True)
             best_score = hands[0][1].score
-
-            # 可能有并列赢家
             winners = [(uid, res) for uid, res in hands if res.score == best_score]
             share = pot_amount // len(winners)
             remainder = pot_amount % len(winners)
@@ -451,11 +457,9 @@ class GameEngine:
                 won = share + (1 if i < remainder else 0)
                 total_awarded[uid] = total_awarded.get(uid, 0) + won
 
-        # 发放奖池
         for uid, won in total_awarded.items():
             self.players[uid].chips += won
 
-        # 构建结果
         for p in active_players:
             all_cards = p.hole_cards + self.community_cards
             result = evaluate(all_cards)
@@ -473,8 +477,6 @@ class GameEngine:
         await self._reset_for_next_hand()
 
     def _calculate_pots(self) -> list[tuple[int, list[str]]]:
-        """计算主池和边池"""
-        # 收集所有参与者的总下注
         active_bets = []
         for p in self.players.values():
             if p.status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN, PlayerStatus.FOLDED):
@@ -484,7 +486,6 @@ class GameEngine:
         if not active_bets:
             return []
 
-        # 找到所有不同的下注等级 (all-in的金额)
         all_in_amounts = sorted(set(
             bet for uid, bet, status in active_bets
             if status == PlayerStatus.ALL_IN
@@ -494,7 +495,6 @@ class GameEngine:
                      if status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN)]
 
         if not all_in_amounts:
-            # 没有人all-in, 一个主池
             return [(self.main_pot, eligible)]
 
         pots = []
@@ -512,7 +512,6 @@ class GameEngine:
                 pots.append((pot_amount, pot_eligible))
             prev_level = level
 
-        # 剩余的归主池
         remaining = 0
         remaining_eligible = []
         for uid, bet, status in active_bets:
@@ -524,21 +523,19 @@ class GameEngine:
         if remaining > 0 and remaining_eligible:
             pots.append((remaining, remaining_eligible))
 
-        # 如果没有边池，返回简单的主池
         if not pots:
             return [(self.main_pot, eligible)]
 
         return pots
 
     async def _reset_for_next_hand(self):
-        """重置准备下一手牌"""
         self._cancel_turn_timer()
         self.phase = GamePhase.WAITING
         self.community_cards = []
         self.current_bet = 0
         self.current_player_seat = -1
+        self._players_to_act.clear()
 
-        # 踢出没有筹码的玩家
         broke_players = [uid for uid, p in self.players.items() if p.chips <= 0]
         for uid in broke_players:
             p = self.players[uid]
@@ -567,7 +564,6 @@ class GameEngine:
             self._turn_timer_task = None
 
     async def _turn_timeout_handler(self):
-        """超时自动弃牌/过牌"""
         try:
             await asyncio.sleep(self.turn_timeout)
             if self.current_player_seat == -1:
@@ -578,8 +574,6 @@ class GameEngine:
             player = self.players.get(uid)
             if not player or player.status != PlayerStatus.ACTIVE:
                 return
-
-            # 能过牌就过牌，否则弃牌
             call_amount = self.current_bet - player.current_bet
             if call_amount <= 0:
                 await self.player_action(uid, "check")
@@ -591,7 +585,6 @@ class GameEngine:
     # ─── 状态获取 ───
 
     def get_state(self, for_user_id: str | None = None) -> dict:
-        """获取当前游戏状态 (针对特定玩家的视角)"""
         players_data = []
         for uid, p in self.players.items():
             show_cards = False
@@ -601,10 +594,8 @@ class GameEngine:
                 show_cards = True
             players_data.append(p.to_dict(show_cards=show_cards))
 
-        # 排序
         players_data.sort(key=lambda x: x["seat"])
 
-        # 可行动选项
         actions = []
         if for_user_id and self.phase not in (GamePhase.WAITING, GamePhase.SHOWDOWN):
             player = self.players.get(for_user_id)
@@ -649,6 +640,5 @@ class GameEngine:
         }
 
     async def _broadcast_state(self, event: str = "update"):
-        """广播游戏状态"""
         if self._broadcast:
             await self._broadcast(event, self)
