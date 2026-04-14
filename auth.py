@@ -6,23 +6,15 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 import config
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
-def _truncate_password(password: str) -> str:
-    """bcrypt 限制密码最多72字节，按字节截断"""
-    encoded = password.encode("utf-8")
-    if len(encoded) > 72:
-        encoded = encoded[:72]
-    return encoded.decode("utf-8", errors="ignore")
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(_truncate_password(password))
+    return pwd_context.hash(password)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(_truncate_password(plain), hashed)
+    return pwd_context.verify(plain, hashed)
 
 
 def create_token(data: dict, expires_delta: timedelta | None = None) -> str:
