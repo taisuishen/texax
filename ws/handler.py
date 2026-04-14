@@ -11,6 +11,8 @@ from game.engine import GameEngine, GamePhase, PlayerStatus
 
 logger = logging.getLogger("poker.ws")
 
+RECONNECT_GRACE_SECONDS = 15  # 断线重连宽限期
+
 
 class ConnectionManager:
     """WebSocket 连接管理器"""
@@ -19,42 +21,101 @@ class ConnectionManager:
         self.connections: dict[str, WebSocket] = {}  # user_id -> WebSocket
         self.ws_to_user: dict[int, str] = {}         # ws.id -> user_id
         self.game_engine: GameEngine | None = None
+        self._disconnect_timers: dict[str, asyncio.Task] = {}  # user_id -> 延迟踢出task
 
     def set_engine(self, engine: GameEngine):
         self.game_engine = engine
 
     async def connect(self, ws: WebSocket, user_id: str):
+        # ★ 如果有待执行的断线踢出，取消它（用户刷新重连了）
+        timer = self._disconnect_timers.pop(user_id, None)
+        if timer and not timer.done():
+            timer.cancel()
+            logger.info(f"Player {user_id} reconnected, cancelled disconnect timer")
+
+        # 替换旧连接
+        old_ws = self.connections.get(user_id)
+        if old_ws:
+            # 清理旧ws映射
+            old_ws_id = None
+            for wid, uid in list(self.ws_to_user.items()):
+                if uid == user_id:
+                    old_ws_id = wid
+                    break
+            if old_ws_id:
+                self.ws_to_user.pop(old_ws_id, None)
+
         self.connections[user_id] = ws
         self.ws_to_user[id(ws)] = user_id
         logger.info(f"Player {user_id} connected")
 
     async def disconnect(self, ws: WebSocket):
         user_id = self.ws_to_user.pop(id(ws), None)
-        if user_id:
-            self.connections.pop(user_id, None)
-            if self.game_engine:
-                player = self.game_engine.get_player(user_id)
-                if player:
-                    # 保存筹码
-                    user_data = await redis_client.get_user(user_id)
-                    if user_data:
-                        user_data["chips"] = player.chips
-                        await redis_client.save_user(user_id, user_data)
+        if not user_id:
+            return
 
-                    if self.game_engine.phase != GamePhase.WAITING:
-                        # 游戏中断线: 标记弃牌, 如果轮到他则自动弃牌
-                        if player.status == PlayerStatus.ACTIVE:
-                            if player.seat == self.game_engine.current_player_seat:
-                                await self.game_engine.player_action(user_id, "fold")
-                            else:
-                                player.status = PlayerStatus.FOLDED
-                        # 游戏结束后会被清理
-                    else:
-                        # 等待阶段直接离座
-                        self.game_engine.stand_up(user_id)
+        # 如果当前连接已被新ws替换（重连），不做任何处理
+        current_ws = self.connections.get(user_id)
+        if current_ws is not ws:
+            logger.info(f"Player {user_id} old ws closed (already reconnected)")
+            return
 
-                    await self.broadcast_game_state("player_leave")
-            logger.info(f"Player {user_id} disconnected")
+        self.connections.pop(user_id, None)
+
+        if not self.game_engine:
+            return
+
+        player = self.game_engine.get_player(user_id)
+        if not player:
+            logger.info(f"Player {user_id} disconnected (not seated)")
+            return
+
+        # 保存筹码
+        user_data = await redis_client.get_user(user_id)
+        if user_data:
+            user_data["chips"] = player.chips
+            await redis_client.save_user(user_id, user_data)
+
+        # ★ 启动延迟踢出（给玩家重连的机会）
+        self._disconnect_timers[user_id] = asyncio.create_task(
+            self._delayed_disconnect(user_id)
+        )
+        logger.info(f"Player {user_id} disconnected, grace period {RECONNECT_GRACE_SECONDS}s started")
+
+    async def _delayed_disconnect(self, user_id: str):
+        """延迟踢出：宽限期内没重连则真正踢掉"""
+        try:
+            await asyncio.sleep(RECONNECT_GRACE_SECONDS)
+        except asyncio.CancelledError:
+            return  # 重连了，取消踢出
+
+        # 宽限期到了还没重连
+        self._disconnect_timers.pop(user_id, None)
+
+        # 再次确认没有重连
+        if user_id in self.connections:
+            return
+
+        engine = self.game_engine
+        if not engine:
+            return
+
+        player = engine.get_player(user_id)
+        if not player:
+            return
+
+        logger.info(f"Player {user_id} grace period expired, removing from table")
+
+        if engine.phase != GamePhase.WAITING:
+            if player.status == PlayerStatus.ACTIVE:
+                if player.seat == engine.current_player_seat:
+                    await engine.player_action(user_id, "fold")
+                else:
+                    player.status = PlayerStatus.FOLDED
+        else:
+            engine.stand_up(user_id)
+
+        await self.broadcast_game_state("player_leave")
 
     async def send_personal(self, user_id: str, message: dict):
         ws = self.connections.get(user_id)
@@ -118,7 +179,6 @@ class ConnectionManager:
         elif msg_type == "stand_up":
             ok = engine.stand_up(user_id)
             if ok:
-                # 保存筹码回Redis
                 player_data = await redis_client.get_user(user_id)
                 if player_data:
                     await redis_client.save_user(user_id, player_data)
@@ -134,7 +194,6 @@ class ConnectionManager:
             player.is_ready = not player.is_ready
             await self.broadcast_game_state("player_ready")
 
-            # 尝试开始游戏
             if player.is_ready:
                 await engine.try_start_game()
 

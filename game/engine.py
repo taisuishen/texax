@@ -338,7 +338,7 @@ class GameEngine:
                     f"amount={amount} did_raise={did_raise} "
                     f"remaining_to_act={self._players_to_act}")
 
-        await self._broadcast_state("player_action")
+        # ★ 不在这里广播，让 _advance_game 在最终状态确定后统一广播
         await self._advance_game()
 
         return {"ok": True, "action": action}
