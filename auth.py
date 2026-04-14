@@ -9,12 +9,20 @@ import config
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
+def _truncate_password(password: str) -> str:
+    """bcrypt 限制密码最多72字节，按字节截断"""
+    encoded = password.encode("utf-8")
+    if len(encoded) > 72:
+        encoded = encoded[:72]
+    return encoded.decode("utf-8", errors="ignore")
+
+
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password[:72])
+    return pwd_context.hash(_truncate_password(password))
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain[:72], hashed)
+    return pwd_context.verify(_truncate_password(plain), hashed)
 
 
 def create_token(data: dict, expires_delta: timedelta | None = None) -> str:
