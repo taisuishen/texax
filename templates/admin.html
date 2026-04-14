@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>德州扑克 - 后台管理</title>
+    <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+<body>
+    <!-- 登录 -->
+    <div id="admin-login" class="screen">
+        <div class="login-box">
+            <h1>🔧 后台管理</h1>
+            <input type="text" id="admin-username" placeholder="管理员用户名" value="admin">
+            <input type="password" id="admin-password" placeholder="管理员密码">
+            <button onclick="adminLogin()">登录</button>
+            <p id="admin-login-error" class="error-text"></p>
+        </div>
+    </div>
+
+    <!-- 管理面板 -->
+    <div id="admin-panel" class="screen" style="display:none">
+        <div class="admin-header">
+            <h1>🔧 德州扑克后台管理</h1>
+            <button class="btn-logout" onclick="adminLogout()">退出</button>
+        </div>
+
+        <div class="admin-grid">
+            <!-- 用户管理 -->
+            <div class="admin-card">
+                <h2>👤 用户管理</h2>
+                <div class="form-section">
+                    <h3>创建用户</h3>
+                    <input type="text" id="new-username" placeholder="用户名">
+                    <input type="password" id="new-password" placeholder="密码">
+                    <input type="number" id="new-chips" placeholder="初始筹码" value="1000">
+                    <button onclick="createUser()">创建用户</button>
+                    <p id="create-user-msg" class="msg-text"></p>
+                </div>
+                <div class="form-section">
+                    <h3>充值筹码</h3>
+                    <select id="recharge-user"></select>
+                    <input type="number" id="recharge-amount" placeholder="充值金额" value="1000">
+                    <button onclick="addChips()">充值</button>
+                    <p id="recharge-msg" class="msg-text"></p>
+                </div>
+                <div class="form-section">
+                    <h3>用户列表</h3>
+                    <button onclick="loadUsers()">刷新</button>
+                    <table id="users-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>用户名</th>
+                                <th>筹码</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 桌台设置 -->
+            <div class="admin-card">
+                <h2>🎰 桌台设置</h2>
+                <div class="form-section">
+                    <label>小盲注</label>
+                    <input type="number" id="cfg-small-blind" min="1">
+                    <label>大盲注</label>
+                    <input type="number" id="cfg-big-blind" min="2">
+                    <label>单步时长 (秒)</label>
+                    <input type="number" id="cfg-turn-timeout" min="5" max="120">
+                    <label>最大玩家数</label>
+                    <input type="number" id="cfg-max-players" min="2" max="9">
+                    <button onclick="saveTableConfig()">保存设置</button>
+                    <p id="config-msg" class="msg-text"></p>
+                </div>
+
+                <div class="form-section">
+                    <h3>服务器状态</h3>
+                    <div id="server-status">加载中...</div>
+                    <button onclick="checkHealth()">刷新状态</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/admin.js"></script>
+</body>
+</html>

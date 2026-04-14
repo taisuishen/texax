@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>德州扑克</title>
+    <link rel="stylesheet" href="/static/css/poker.css">
+</head>
+<body>
+    <!-- 登录界面 -->
+    <div id="login-screen" class="screen">
+        <div class="login-box">
+            <h1>♠ 德州扑克 ♥</h1>
+            <p class="subtitle">Texas Hold'em Online</p>
+            <input type="text" id="login-username" placeholder="用户名" autocomplete="off">
+            <input type="password" id="login-password" placeholder="密码">
+            <button id="btn-login" onclick="doLogin()">进入游戏</button>
+            <p id="login-error" class="error-text"></p>
+        </div>
+    </div>
+
+    <!-- 游戏界面 -->
+    <div id="game-screen" class="screen" style="display:none">
+        <!-- 顶部信息栏 -->
+        <div class="top-bar">
+            <div class="user-info">
+                <span id="display-username"></span>
+                <span id="display-chips" class="chips-badge"></span>
+            </div>
+            <div class="table-info">
+                <span id="display-blinds"></span>
+                <span id="display-hand-num"></span>
+            </div>
+            <button class="btn-small" onclick="toggleChat()">💬</button>
+        </div>
+
+        <!-- 牌桌 -->
+        <div class="table-container">
+            <div class="poker-table">
+                <!-- 公共牌区 -->
+                <div class="community-area">
+                    <div id="community-cards" class="card-row"></div>
+                    <div id="pot-display" class="pot">底池: 0</div>
+                </div>
+
+                <!-- 9个座位 -->
+                <div id="seat-0" class="seat seat-pos-0" onclick="clickSeat(0)"></div>
+                <div id="seat-1" class="seat seat-pos-1" onclick="clickSeat(1)"></div>
+                <div id="seat-2" class="seat seat-pos-2" onclick="clickSeat(2)"></div>
+                <div id="seat-3" class="seat seat-pos-3" onclick="clickSeat(3)"></div>
+                <div id="seat-4" class="seat seat-pos-4" onclick="clickSeat(4)"></div>
+                <div id="seat-5" class="seat seat-pos-5" onclick="clickSeat(5)"></div>
+                <div id="seat-6" class="seat seat-pos-6" onclick="clickSeat(6)"></div>
+                <div id="seat-7" class="seat seat-pos-7" onclick="clickSeat(7)"></div>
+                <div id="seat-8" class="seat seat-pos-8" onclick="clickSeat(8)"></div>
+
+                <!-- 计时器 -->
+                <div id="turn-timer" class="turn-timer" style="display:none">
+                    <div id="timer-bar" class="timer-bar"></div>
+                    <span id="timer-text">30</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 手牌区域 -->
+        <div id="my-cards-area" class="my-cards-area">
+            <div id="my-hole-cards" class="card-row"></div>
+            <div id="my-hand-info" class="hand-info"></div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div id="action-bar" class="action-bar" style="display:none">
+            <div id="action-buttons" class="action-buttons"></div>
+            <div id="raise-slider" class="raise-slider" style="display:none">
+                <input type="range" id="raise-range" min="0" max="1000" value="0">
+                <input type="number" id="raise-input" min="0" max="1000" value="0">
+                <button class="btn-action btn-raise" onclick="doRaise()">确认加注</button>
+            </div>
+        </div>
+
+        <!-- 准备/离座按钮 -->
+        <div id="seat-actions" class="seat-actions" style="display:none">
+            <button id="btn-ready" class="btn-action btn-ready" onclick="toggleReady()">准备</button>
+            <button id="btn-standup" class="btn-action btn-fold" onclick="doStandUp()">离座</button>
+        </div>
+
+        <!-- 摊牌结果 -->
+        <div id="showdown-overlay" class="showdown-overlay" style="display:none">
+            <div class="showdown-content">
+                <h2>🏆 本局结果</h2>
+                <div id="showdown-results"></div>
+                <button onclick="closeShowdown()">继续</button>
+            </div>
+        </div>
+
+        <!-- 聊天面板 -->
+        <div id="chat-panel" class="chat-panel" style="display:none">
+            <div class="chat-header">
+                <span>聊天</span>
+                <button onclick="toggleChat()">✕</button>
+            </div>
+            <div id="chat-messages" class="chat-messages"></div>
+            <div class="chat-input-area">
+                <input type="text" id="chat-input" placeholder="输入消息..." onkeydown="if(event.key==='Enter')sendChat()">
+                <button onclick="sendChat()">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/poker.js"></script>
+</body>
+</html>
