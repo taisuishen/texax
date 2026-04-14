@@ -9,6 +9,7 @@ let gameState = null;
 let mySeat = -1;
 let turnTimerInterval = null;
 let turnTimerEnd = 0;
+let currentTimerSeat = -1;
 
 // ─── 登录 ───
 
@@ -106,7 +107,6 @@ function handleGameState(state, userInfo) {
     }
     gameState = state;
 
-    // 找我的座位
     mySeat = -1;
     const myPlayer = state.players.find(p => p.user_id === userId);
     if (myPlayer) mySeat = myPlayer.seat;
@@ -116,12 +116,11 @@ function handleGameState(state, userInfo) {
     renderActions(state);
     renderTopBar(state);
 
+    // ★ 摊牌时弹出结果, 不自动关闭
     if (state.event === 'showdown' && state.last_hand_results) {
         showShowdown(state.last_hand_results);
     }
-    if (state.event === 'round_end') {
-        closeShowdown();
-    }
+    // round_end 时不再自动关闭 showdown
 }
 
 function renderTopBar(state) {
@@ -132,7 +131,10 @@ function renderTopBar(state) {
 }
 
 function renderTable(state) {
-    const seatsCount = state.seats_count || 9;
+    const seatsCount = state.seats_count || 6;
+
+    // ★ 先清除旧的计时器
+    removeTimer();
 
     for (let i = 0; i < 6; i++) {
         const el = document.getElementById(`seat-${i}`);
@@ -185,13 +187,10 @@ function renderTable(state) {
     // 底池
     document.getElementById('pot-display').textContent = `底池: $${state.main_pot}`;
 
-    // 计时器
-    const timerEl = document.getElementById('turn-timer');
+    // ★ 把计时器挂到当前行动玩家座位上
     if (state.phase !== 'waiting' && state.phase !== 'showdown' && state.current_player_seat >= 0) {
-        timerEl.style.display = '';
-        startTurnTimer(state.turn_timeout);
+        attachTimer(state.current_player_seat, state.turn_timeout);
     } else {
-        timerEl.style.display = 'none';
         stopTurnTimer();
     }
 }
@@ -218,15 +217,7 @@ function renderMyCards(state) {
     }
 
     cardsEl.innerHTML = myP.hole_cards.map(c => makeCardHtml(c, false)).join('');
-
-    // 如果有公共牌，计算当前最佳牌型 (显示给自己看)
-    if (state.community_cards.length >= 3) {
-        // 牌型提示会在摊牌时由服务端返回
-        // 这里做简单的本地提示
-        infoEl.textContent = '';
-    } else {
-        infoEl.textContent = '';
-    }
+    infoEl.textContent = '';
 }
 
 function renderActions(state) {
@@ -234,14 +225,12 @@ function renderActions(state) {
     const seatActions = document.getElementById('seat-actions');
     const myP = state.players.find(p => p.user_id === userId);
 
-    // 未坐下：不显示操作
     if (!myP) {
         actionBar.style.display = 'none';
         seatActions.style.display = 'none';
         return;
     }
 
-    // 等待阶段：显示准备/离座
     if (state.phase === 'waiting') {
         actionBar.style.display = 'none';
         seatActions.style.display = '';
@@ -253,7 +242,6 @@ function renderActions(state) {
 
     seatActions.style.display = 'none';
 
-    // 有可用行动
     if (state.actions && state.actions.length > 0) {
         actionBar.style.display = '';
         const btnsEl = document.getElementById('action-buttons');
@@ -331,27 +319,60 @@ function doStandUp() {
     wsSend({ type: 'stand_up' });
 }
 
-// ─── 计时器 ───
+// ─── 计时器 (挂到座位上) ───
 
-function startTurnTimer(seconds) {
+function removeTimer() {
+    const old = document.getElementById('seat-timer');
+    if (old) old.remove();
+    currentTimerSeat = -1;
+}
+
+function attachTimer(seatIndex, seconds) {
+    // 如果已经在同一个座位上且计时器还在跑, 不重建
+    if (currentTimerSeat === seatIndex && turnTimerInterval) return;
+
+    removeTimer();
     stopTurnTimer();
+
+    const seatEl = document.getElementById(`seat-${seatIndex}`);
+    if (!seatEl) return;
+
+    // 创建计时器DOM, 挂到座位上
+    const timerDiv = document.createElement('div');
+    timerDiv.id = 'seat-timer';
+    timerDiv.className = 'seat-timer';
+    timerDiv.innerHTML = `
+        <div class="seat-timer-bar-bg">
+            <div id="seat-timer-bar" class="seat-timer-bar"></div>
+        </div>
+        <span id="seat-timer-text" class="seat-timer-text">${seconds}</span>
+    `;
+    seatEl.appendChild(timerDiv);
+    currentTimerSeat = seatIndex;
+
+    // 启动倒计时
     turnTimerEnd = Date.now() + seconds * 1000;
-    const barEl = document.getElementById('timer-bar');
-    const textEl = document.getElementById('timer-text');
-    barEl.style.width = '100%';
+    const barEl = document.getElementById('seat-timer-bar');
+    const textEl = document.getElementById('seat-timer-text');
 
     turnTimerInterval = setInterval(() => {
         const remaining = Math.max(0, turnTimerEnd - Date.now());
         const pct = (remaining / (seconds * 1000)) * 100;
-        barEl.style.width = pct + '%';
-        textEl.textContent = Math.ceil(remaining / 1000);
-
-        if (pct < 30) barEl.style.background = '#e74c3c';
-        else if (pct < 60) barEl.style.background = '#f39c12';
-        else barEl.style.background = '#f0a500';
-
-        if (remaining <= 0) stopTurnTimer();
+        if (barEl) {
+            barEl.style.width = pct + '%';
+            if (pct < 30) barEl.style.background = '#e74c3c';
+            else if (pct < 60) barEl.style.background = '#f39c12';
+            else barEl.style.background = '#4caf50';
+        }
+        if (textEl) textEl.textContent = Math.ceil(remaining / 1000);
+        if (remaining <= 0) {
+            stopTurnTimer();
+        }
     }, 200);
+}
+
+function startTurnTimer(seconds) {
+    // 兼容旧调用, 现在由 attachTimer 处理
 }
 
 function stopTurnTimer() {
@@ -361,7 +382,7 @@ function stopTurnTimer() {
     }
 }
 
-// ─── 摊牌结果 ───
+// ─── 摊牌结果 (不自动关闭) ───
 
 function showShowdown(results) {
     const overlay = document.getElementById('showdown-overlay');
@@ -460,8 +481,6 @@ window.onload = function() {
     if (token) {
         enterGame();
     }
-
-    // Enter键登录
     document.getElementById('login-password').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') doLogin();
     });
