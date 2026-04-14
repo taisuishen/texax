@@ -79,7 +79,7 @@ class PotInfo:
 class GameEngine:
     """单桌德州扑克游戏引擎"""
 
-    def __init__(self, broadcast_callback=None):
+    def __init__(self, broadcast_callback=None, is_online_callback=None):
         self.players: dict[str, Player] = {}
         self.seats: dict[int, str] = {}
 
@@ -97,7 +97,7 @@ class GameEngine:
         self.small_blind = 10
         self.big_blind = 20
         self.turn_timeout = 30
-        self.max_players = 9
+        self.max_players = 6
 
         self.current_bet = 0
         self.min_raise = 0
@@ -107,6 +107,7 @@ class GameEngine:
 
         self._turn_timer_task: asyncio.Task | None = None
         self._broadcast = broadcast_callback
+        self._is_online = is_online_callback  # 检查玩家是否在线
         self._action_lock = asyncio.Lock()
 
         self.hand_number = 0
@@ -536,19 +537,28 @@ class GameEngine:
         self.current_player_seat = -1
         self._players_to_act.clear()
 
-        broke_players = [uid for uid, p in self.players.items() if p.chips <= 0]
-        for uid in broke_players:
-            p = self.players[uid]
-            p.status = PlayerStatus.SITTING
-            p.is_ready = False
+        # 踢掉断线的玩家和没筹码的玩家
+        to_remove = []
+        for uid, p in self.players.items():
+            is_online = self._is_online(uid) if self._is_online else True
+            if not is_online or p.chips <= 0:
+                to_remove.append(uid)
 
+        for uid in to_remove:
+            p = self.players[uid]
+            seat = p.seat
+            del self.players[uid]
+            del self.seats[seat]
+            logger.info(f"Removed player {uid} (offline or broke)")
+
+        # 重置剩余玩家状态, 不自动准备
         for p in self.players.values():
             p.hole_cards = []
             p.current_bet = 0
             p.total_bet = 0
             p.last_action = ""
-            if p.chips > 0:
-                p.status = PlayerStatus.SITTING
+            p.status = PlayerStatus.SITTING
+            p.is_ready = False  # ★ 每局结束后需要重新准备
 
         await self._broadcast_state("round_end")
 

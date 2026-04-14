@@ -110,26 +110,20 @@ body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #1a1a
     padding: 1px 8px; border-radius: 10px; font-size: 10px;
 }
 
-/* ── 座位位置: 椭圆均匀分布9个座位 ── */
+/* ── 座位位置: 6个座位椭圆均匀分布 ── */
 /*
-    牌桌800x420，座位按椭圆分布
-    0=底部中间(自己), 1-8顺时针排列
-        4
-      3   5
-     2     6
-      1   7
+    牌桌800x420, 6座位顺时针:
+        3
+     2     4
+     1     5
         0
-         8 (底部偏左)
 */
 .seat-pos-0 { bottom: -35px; left: 50%; transform: translateX(-50%); }
-.seat-pos-1 { bottom: 30px; left: -20px; }
-.seat-pos-2 { top: 50%; left: -50px; transform: translateY(-50%); }
-.seat-pos-3 { top: 10px; left: 30px; }
-.seat-pos-4 { top: -35px; left: 50%; transform: translateX(-50%); }
-.seat-pos-5 { top: 10px; right: 30px; }
-.seat-pos-6 { top: 50%; right: -50px; transform: translateY(-50%); }
-.seat-pos-7 { bottom: 30px; right: -20px; }
-.seat-pos-8 { bottom: -35px; left: 25%; transform: translateX(-50%); }
+.seat-pos-1 { top: 50%; left: -50px; transform: translateY(-50%); }
+.seat-pos-2 { top: 10px; left: 60px; }
+.seat-pos-3 { top: -35px; left: 50%; transform: translateX(-50%); }
+.seat-pos-4 { top: 10px; right: 60px; }
+.seat-pos-5 { top: 50%; right: -50px; transform: translateY(-50%); }
 
 /* 计时器 */
 .turn-timer {
@@ -270,16 +264,13 @@ body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #1a1a
     .seat.dealer::after { width: 16px; height: 16px; font-size: 9px; top: -8px; right: -6px; }
     .seat.sb::before, .seat.bb::before { font-size: 8px; top: -8px; left: -4px; padding: 0 3px; }
 
-    /* 手机座位位置 */
-    .seat-pos-0 { bottom: -25px; left: 50%; transform: translateX(-50%); }
-    .seat-pos-1 { bottom: 10px; left: -10px; }
-    .seat-pos-2 { top: 50%; left: -30px; transform: translateY(-50%); }
-    .seat-pos-3 { top: 5px; left: 15px; }
-    .seat-pos-4 { top: -25px; left: 50%; transform: translateX(-50%); }
-    .seat-pos-5 { top: 5px; right: 15px; }
-    .seat-pos-6 { top: 50%; right: -30px; transform: translateY(-50%); }
-    .seat-pos-7 { bottom: 10px; right: -10px; }
-    .seat-pos-8 { bottom: -25px; left: 25%; transform: translateX(-50%); }
+    /* 手机座位位置 (6座) */
+    .seat-pos-0 { bottom: -22px; left: 50%; transform: translateX(-50%); }
+    .seat-pos-1 { top: 50%; left: -28px; transform: translateY(-50%); }
+    .seat-pos-2 { top: 2px; left: 25px; }
+    .seat-pos-3 { top: -22px; left: 50%; transform: translateX(-50%); }
+    .seat-pos-4 { top: 2px; right: 25px; }
+    .seat-pos-5 { top: 50%; right: -28px; transform: translateY(-50%); }
 
     /* 扑克牌缩小 */
     .card { width: 36px; height: 52px; }
@@ -329,15 +320,12 @@ body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #1a1a
     .seat .seat-name { font-size: 9px; }
     .seat .seat-chips { font-size: 8px; }
 
-    .seat-pos-0 { bottom: -22px; }
-    .seat-pos-1 { bottom: 5px; left: -8px; }
-    .seat-pos-2 { left: -26px; }
-    .seat-pos-3 { top: 2px; left: 8px; }
-    .seat-pos-4 { top: -22px; }
-    .seat-pos-5 { top: 2px; right: 8px; }
-    .seat-pos-6 { right: -26px; }
-    .seat-pos-7 { bottom: 5px; right: -8px; }
-    .seat-pos-8 { bottom: -22px; }
+    .seat-pos-0 { bottom: -20px; left: 50%; transform: translateX(-50%); }
+    .seat-pos-1 { top: 50%; left: -24px; transform: translateY(-50%); }
+    .seat-pos-2 { top: 0px; left: 15px; }
+    .seat-pos-3 { top: -20px; left: 50%; transform: translateX(-50%); }
+    .seat-pos-4 { top: 0px; right: 15px; }
+    .seat-pos-5 { top: 50%; right: -24px; transform: translateY(-50%); }
 
     .card { width: 30px; height: 44px; }
     .card .card-rank { font-size: 11px; }

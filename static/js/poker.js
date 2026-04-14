@@ -134,7 +134,7 @@ function renderTopBar(state) {
 function renderTable(state) {
     const seatsCount = state.seats_count || 9;
 
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 6; i++) {
         const el = document.getElementById(`seat-${i}`);
         if (i >= seatsCount) { el.style.display = 'none'; continue; }
         el.style.display = '';

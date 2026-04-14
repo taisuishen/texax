@@ -7,7 +7,7 @@ import asyncio
 from fastapi import WebSocket, WebSocketDisconnect
 from auth import decode_token, verify_password, create_player_token
 import redis_client
-from game.engine import GameEngine, GamePhase
+from game.engine import GameEngine, GamePhase, PlayerStatus
 
 logger = logging.getLogger("poker.ws")
 
@@ -32,11 +32,27 @@ class ConnectionManager:
         user_id = self.ws_to_user.pop(id(ws), None)
         if user_id:
             self.connections.pop(user_id, None)
-            # 如果在游戏中，处理断线
             if self.game_engine:
                 player = self.game_engine.get_player(user_id)
-                if player and self.game_engine.phase == GamePhase.WAITING:
-                    self.game_engine.stand_up(user_id)
+                if player:
+                    # 保存筹码
+                    user_data = await redis_client.get_user(user_id)
+                    if user_data:
+                        user_data["chips"] = player.chips
+                        await redis_client.save_user(user_id, user_data)
+
+                    if self.game_engine.phase != GamePhase.WAITING:
+                        # 游戏中断线: 标记弃牌, 如果轮到他则自动弃牌
+                        if player.status == PlayerStatus.ACTIVE:
+                            if player.seat == self.game_engine.current_player_seat:
+                                await self.game_engine.player_action(user_id, "fold")
+                            else:
+                                player.status = PlayerStatus.FOLDED
+                        # 游戏结束后会被清理
+                    else:
+                        # 等待阶段直接离座
+                        self.game_engine.stand_up(user_id)
+
                     await self.broadcast_game_state("player_leave")
             logger.info(f"Player {user_id} disconnected")
 

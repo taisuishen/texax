@@ -33,6 +33,7 @@ async def lifespan(app: FastAPI):
         max_players=table_cfg["max_players"],
     )
     game_engine._broadcast = manager.broadcast_game_state
+    game_engine._is_online = lambda uid: uid in manager.connections
     manager.set_engine(game_engine)
     logger.info(f"Texas Hold'em server starting on {config.SERVER_HOST}:{config.SERVER_PORT}")
     logger.info(f"Table config: SB={table_cfg['small_blind']} BB={table_cfg['big_blind']} "
