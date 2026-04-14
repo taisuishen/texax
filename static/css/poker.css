@@ -110,20 +110,30 @@ body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #1a1a
     padding: 1px 8px; border-radius: 10px; font-size: 10px;
 }
 
-/* 座位位置 (椭圆分布) */
-.seat-pos-0 { bottom: -10px; left: 50%; transform: translateX(-50%); }
-.seat-pos-1 { bottom: 20px; left: 5%; }
-.seat-pos-2 { top: 50%; left: -40px; transform: translateY(-50%); }
-.seat-pos-3 { top: 20px; left: 5%; }
-.seat-pos-4 { top: -10px; left: 50%; transform: translateX(-50%); }
-.seat-pos-5 { top: 20px; right: 5%; }
-.seat-pos-6 { top: 50%; right: -40px; transform: translateY(-50%); }
-.seat-pos-7 { bottom: 20px; right: 5%; }
-.seat-pos-8 { bottom: 60px; left: 25%; }
+/* ── 座位位置: 椭圆均匀分布9个座位 ── */
+/*
+    牌桌800x420，座位按椭圆分布
+    0=底部中间(自己), 1-8顺时针排列
+        4
+      3   5
+     2     6
+      1   7
+        0
+         8 (底部偏左)
+*/
+.seat-pos-0 { bottom: -35px; left: 50%; transform: translateX(-50%); }
+.seat-pos-1 { bottom: 30px; left: -20px; }
+.seat-pos-2 { top: 50%; left: -50px; transform: translateY(-50%); }
+.seat-pos-3 { top: 10px; left: 30px; }
+.seat-pos-4 { top: -35px; left: 50%; transform: translateX(-50%); }
+.seat-pos-5 { top: 10px; right: 30px; }
+.seat-pos-6 { top: 50%; right: -50px; transform: translateY(-50%); }
+.seat-pos-7 { bottom: 30px; right: -20px; }
+.seat-pos-8 { bottom: -35px; left: 25%; transform: translateX(-50%); }
 
 /* 计时器 */
 .turn-timer {
-    position: absolute; bottom: -40px; left: 50%; transform: translateX(-50%);
+    position: absolute; bottom: -50px; left: 50%; transform: translateX(-50%);
     width: 160px; text-align: center;
 }
 .timer-bar {
@@ -228,3 +238,113 @@ body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #1a1a
 
 @keyframes dealCard { from { transform: scale(0) rotate(-180deg); opacity: 0; } to { transform: scale(1) rotate(0); opacity: 1; } }
 .card.deal-anim { animation: dealCard 0.3s ease-out; }
+
+/* ═══════════════════════════════════════════════
+   手机端响应式适配 (宽度 <= 768px)
+   ═══════════════════════════════════════════════ */
+@media (max-width: 768px) {
+    body { overflow: auto; height: auto; }
+
+    /* 登录框 */
+    .login-box { width: 90%; padding: 24px; }
+    .login-box h1 { font-size: 24px; }
+
+    /* 顶部栏 */
+    .top-bar { height: 40px; padding: 0 10px; font-size: 12px; }
+    .top-bar .chips-badge { font-size: 11px; padding: 1px 6px; }
+
+    /* 牌桌缩放 */
+    .table-container { padding-top: 40px; padding-bottom: 120px; align-items: flex-start; padding-top: 50px; }
+    .poker-table {
+        width: 360px; height: 200px; border-width: 6px; border-radius: 100px;
+    }
+
+    /* 座位缩小 */
+    .seat { width: 60px; height: 42px; border-radius: 6px; font-size: 10px; }
+    .seat .seat-name { font-size: 10px; }
+    .seat .seat-chips { font-size: 9px; }
+    .seat .seat-action { font-size: 8px; }
+    .seat .seat-bet { font-size: 9px; bottom: -16px; padding: 0 5px; }
+    .seat .seat-cards { top: -24px; }
+    .seat .ready-badge { font-size: 8px; bottom: -14px; padding: 0 5px; }
+    .seat.dealer::after { width: 16px; height: 16px; font-size: 9px; top: -8px; right: -6px; }
+    .seat.sb::before, .seat.bb::before { font-size: 8px; top: -8px; left: -4px; padding: 0 3px; }
+
+    /* 手机座位位置 */
+    .seat-pos-0 { bottom: -25px; left: 50%; transform: translateX(-50%); }
+    .seat-pos-1 { bottom: 10px; left: -10px; }
+    .seat-pos-2 { top: 50%; left: -30px; transform: translateY(-50%); }
+    .seat-pos-3 { top: 5px; left: 15px; }
+    .seat-pos-4 { top: -25px; left: 50%; transform: translateX(-50%); }
+    .seat-pos-5 { top: 5px; right: 15px; }
+    .seat-pos-6 { top: 50%; right: -30px; transform: translateY(-50%); }
+    .seat-pos-7 { bottom: 10px; right: -10px; }
+    .seat-pos-8 { bottom: -25px; left: 25%; transform: translateX(-50%); }
+
+    /* 扑克牌缩小 */
+    .card { width: 36px; height: 52px; }
+    .card .card-rank { font-size: 13px; }
+    .card .card-suit { font-size: 12px; }
+    .card-back { width: 36px; height: 52px; }
+    .card-small { width: 26px; height: 38px; }
+    .card-small .card-rank { font-size: 10px; }
+    .card-small .card-suit { font-size: 9px; }
+
+    /* 公共牌 */
+    .community-area .card-row { gap: 3px; }
+    .pot { font-size: 13px; margin-top: 6px; }
+
+    /* 我的手牌 */
+    .my-cards-area { bottom: 100px; gap: 10px; }
+
+    /* 操作栏 */
+    .action-bar { padding: 8px 10px; }
+    .action-buttons { gap: 6px; }
+    .btn-action { padding: 8px 14px; font-size: 13px; }
+
+    .seat-actions { padding: 8px 10px; }
+    .seat-actions .btn-action { padding: 8px 16px; font-size: 13px; }
+
+    .raise-slider { flex-wrap: wrap; gap: 6px; }
+    .raise-slider input[type=range] { width: 140px; }
+    .raise-slider input[type=number] { width: 70px; }
+
+    /* 计时器 */
+    .turn-timer { width: 100px; bottom: -35px; }
+
+    /* 摊牌 */
+    .showdown-content { padding: 16px; }
+    .showdown-content h2 { font-size: 18px; }
+    .result-item { padding: 8px; }
+
+    /* 聊天 */
+    .chat-panel { width: 100%; }
+}
+
+/* 超小屏 (宽度 <= 400px) */
+@media (max-width: 400px) {
+    .poker-table { width: 300px; height: 170px; border-radius: 85px; }
+
+    .seat { width: 52px; height: 36px; }
+    .seat .seat-name { font-size: 9px; }
+    .seat .seat-chips { font-size: 8px; }
+
+    .seat-pos-0 { bottom: -22px; }
+    .seat-pos-1 { bottom: 5px; left: -8px; }
+    .seat-pos-2 { left: -26px; }
+    .seat-pos-3 { top: 2px; left: 8px; }
+    .seat-pos-4 { top: -22px; }
+    .seat-pos-5 { top: 2px; right: 8px; }
+    .seat-pos-6 { right: -26px; }
+    .seat-pos-7 { bottom: 5px; right: -8px; }
+    .seat-pos-8 { bottom: -22px; }
+
+    .card { width: 30px; height: 44px; }
+    .card .card-rank { font-size: 11px; }
+    .card .card-suit { font-size: 10px; }
+    .card-small { width: 22px; height: 32px; }
+    .card-small .card-rank { font-size: 9px; }
+    .card-small .card-suit { font-size: 8px; }
+
+    .btn-action { padding: 6px 10px; font-size: 12px; }
+}
