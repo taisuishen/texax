@@ -234,13 +234,13 @@ function renderCommunityCards(cards) {
     }
     ccEl.innerHTML = html;
 
-    // 新牌逐张翻开, 每张间隔2秒
+    // 新牌逐张翻开, 每张间隔3秒
     const newCards = cards.slice(alreadyShown);
     newCards.forEach((card, idx) => {
         setTimeout(() => {
             ccEl.innerHTML += makeCardHtml(card, false, true);
             shownCommunityCount = alreadyShown + idx + 1;
-        }, idx * 2000);
+        }, idx * 3000);
     });
 }
 
