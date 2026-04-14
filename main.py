@@ -32,8 +32,15 @@ async def lifespan(app: FastAPI):
         turn_timeout=table_cfg["turn_timeout"],
         max_players=table_cfg["max_players"],
     )
+    async def save_player_chips(user_id, chips):
+        user_data = await redis_client.get_user(user_id)
+        if user_data:
+            user_data["chips"] = chips
+            await redis_client.save_user(user_id, user_data)
+
     game_engine._broadcast = manager.broadcast_game_state
     game_engine._is_online = lambda uid: uid in manager.connections
+    game_engine._save_chips = save_player_chips
     manager.set_engine(game_engine)
     logger.info(f"Texas Hold'em server starting on {config.SERVER_HOST}:{config.SERVER_PORT}")
     logger.info(f"Table config: SB={table_cfg['small_blind']} BB={table_cfg['big_blind']} "

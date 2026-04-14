@@ -151,7 +151,7 @@ function renderTable(state) {
 
         el.classList.add('occupied');
         if (p.status === 'folded') el.classList.add('folded');
-        if (state.current_player_seat === i && state.phase !== 'waiting' && state.phase !== 'showdown') {
+        if (state.current_player_seat === i && state.phase !== 'waiting' && state.phase !== 'showdown' && state.phase !== 'settling') {
             el.classList.add('active-turn');
         }
         if (state.dealer_seat === i) el.classList.add('dealer');
@@ -176,7 +176,7 @@ function renderTable(state) {
             <span class="seat-chips">$${p.chips}</span>
             ${actionText ? `<span class="seat-action">${actionText}</span>` : ''}
             ${p.current_bet > 0 ? `<span class="seat-bet">${p.current_bet}</span>` : ''}
-            ${(state.phase === 'waiting' && p.is_ready) ? '<span class="ready-badge">已准备</span>' : ''}
+            ${((state.phase === 'waiting' || state.phase === 'settling') && p.is_ready) ? '<span class="ready-badge">已准备</span>' : ''}
         `;
     }
 
@@ -188,7 +188,7 @@ function renderTable(state) {
     document.getElementById('pot-display').textContent = `底池: $${state.main_pot}`;
 
     // ★ 把计时器挂到当前行动玩家座位上
-    if (state.phase !== 'waiting' && state.phase !== 'showdown' && state.current_player_seat >= 0) {
+    if (state.phase !== 'waiting' && state.phase !== 'showdown' && state.phase !== 'settling' && state.current_player_seat >= 0) {
         attachTimer(state.current_player_seat, state.turn_timeout);
     } else {
         stopTurnTimer();
@@ -236,7 +236,7 @@ function renderActions(state) {
         return;
     }
 
-    if (state.phase === 'waiting') {
+    if (state.phase === 'waiting' || state.phase === 'settling') {
         actionBar.style.display = 'none';
         seatActions.style.display = '';
         const readyBtn = document.getElementById('btn-ready');
