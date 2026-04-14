@@ -10,6 +10,7 @@ let mySeat = -1;
 let turnTimerInterval = null;
 let turnTimerEnd = 0;
 let currentTimerSeat = -1;
+let shownCommunityCount = 0; // 已显示的公共牌数量
 
 // ─── 登录 ───
 
@@ -111,6 +112,11 @@ function handleGameState(state, userInfo) {
     const myPlayer = state.players.find(p => p.user_id === userId);
     if (myPlayer) mySeat = myPlayer.seat;
 
+    // 等待阶段重置公共牌计数
+    if (state.phase === 'waiting') {
+        shownCommunityCount = 0;
+    }
+
     renderTable(state);
     renderMyCards(state);
     renderActions(state);
@@ -161,7 +167,7 @@ function renderTable(state) {
         let cardsHtml = '';
         if (state.phase !== 'waiting') {
             if (p.hole_cards) {
-                cardsHtml = p.hole_cards.map(c => makeCardHtml(c, true)).join('');
+                cardsHtml = p.hole_cards.map(c => makeCardHtml(c, true, false)).join('');
             } else if (p.hole_cards_count > 0) {
                 cardsHtml = '<div class="card-back card-small"></div>'.repeat(p.hole_cards_count);
             }
@@ -180,9 +186,8 @@ function renderTable(state) {
         `;
     }
 
-    // 公共牌
-    const ccEl = document.getElementById('community-cards');
-    ccEl.innerHTML = state.community_cards.map(c => makeCardHtml(c, false)).join('');
+    // 公共牌 (新牌逐张翻开, 每张间隔2秒)
+    renderCommunityCards(state.community_cards);
 
     // 底池
     document.getElementById('pot-display').textContent = `底池: $${state.main_pot}`;
@@ -195,14 +200,48 @@ function renderTable(state) {
     }
 }
 
-function makeCardHtml(card, isSmall) {
+function makeCardHtml(card, isSmall, animate) {
     const sizeClass = isSmall ? 'card-small' : '';
     const isRed = card.suit === '♥' || card.suit === '♦';
     const colorClass = isRed ? 'red' : 'black';
-    return `<div class="card ${sizeClass} ${colorClass} deal-anim">
+    const animClass = animate ? 'deal-anim' : '';
+    return `<div class="card ${sizeClass} ${colorClass} ${animClass}">
         <span class="card-rank">${card.rank}</span>
         <span class="card-suit">${card.suit}</span>
     </div>`;
+}
+
+function renderCommunityCards(cards) {
+    const ccEl = document.getElementById('community-cards');
+    const totalCards = cards.length;
+    const alreadyShown = shownCommunityCount;
+
+    if (totalCards === 0) {
+        ccEl.innerHTML = '';
+        shownCommunityCount = 0;
+        return;
+    }
+
+    if (totalCards <= alreadyShown) {
+        // 没有新牌, 保持原样
+        return;
+    }
+
+    // 已有的牌直接显示 (无动画)
+    let html = '';
+    for (let i = 0; i < alreadyShown; i++) {
+        html += makeCardHtml(cards[i], false, false);
+    }
+    ccEl.innerHTML = html;
+
+    // 新牌逐张翻开, 每张间隔2秒
+    const newCards = cards.slice(alreadyShown);
+    newCards.forEach((card, idx) => {
+        setTimeout(() => {
+            ccEl.innerHTML += makeCardHtml(card, false, true);
+            shownCommunityCount = alreadyShown + idx + 1;
+        }, idx * 2000);
+    });
 }
 
 function renderMyCards(state) {
@@ -216,7 +255,12 @@ function renderMyCards(state) {
         return;
     }
 
-    cardsEl.innerHTML = myP.hole_cards.map(c => makeCardHtml(c, false)).join('');
+    // ★ 手牌不做动画, 只在内容变化时才重新渲染
+    const newHtml = myP.hole_cards.map(c => makeCardHtml(c, false, false)).join('');
+    if (cardsEl.dataset.cards !== JSON.stringify(myP.hole_cards)) {
+        cardsEl.innerHTML = newHtml;
+        cardsEl.dataset.cards = JSON.stringify(myP.hole_cards);
+    }
     infoEl.textContent = '';
 }
 
@@ -397,13 +441,13 @@ function showShowdown(results) {
 
         let cardsHtml = '';
         if (r.hole_cards) {
-            cardsHtml = r.hole_cards.map(c => makeCardHtml(c, true)).join('');
+            cardsHtml = r.hole_cards.map(c => makeCardHtml(c, true, false)).join('');
         }
 
         let bestHtml = '';
         if (r.best_hand && r.best_hand.best_five) {
             bestHtml = '<div class="result-cards">' +
-                r.best_hand.best_five.map(c => makeCardHtml(c, true)).join('') +
+                r.best_hand.best_five.map(c => makeCardHtml(c, true, false)).join('') +
                 '</div>';
         }
 
