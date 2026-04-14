@@ -3,7 +3,7 @@
 """
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -88,7 +88,7 @@ async def player_login(req: PlayerLoginRequest):
 
 
 @app.websocket("/ws")
-async def ws_route(ws):
+async def ws_route(ws: WebSocket):
     await websocket_endpoint(ws)
 
 
