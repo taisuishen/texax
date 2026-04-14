@@ -397,12 +397,19 @@ class GameEngine:
 
         if self.phase == GamePhase.PRE_FLOP:
             self.phase = GamePhase.FLOP
-            self.community_cards.extend(self.deck.deal(3))
+            # ★ 翻牌: 逐张发, 每张间隔3秒
+            for i in range(3):
+                self.community_cards.extend(self.deck.deal(1))
+                await self._broadcast_state("new_card")
+                if i < 2:
+                    await asyncio.sleep(3)
         elif self.phase == GamePhase.FLOP:
             self.phase = GamePhase.TURN
+            await asyncio.sleep(3)
             self.community_cards.extend(self.deck.deal(1))
         elif self.phase == GamePhase.TURN:
             self.phase = GamePhase.RIVER
+            await asyncio.sleep(3)
             self.community_cards.extend(self.deck.deal(1))
         elif self.phase == GamePhase.RIVER:
             await self._showdown()
@@ -413,7 +420,7 @@ class GameEngine:
         # 所有人都all-in了 → 直接跳到下一阶段发牌
         if len(acting_seats) <= 1:
             await self._broadcast_state("new_phase")
-            await asyncio.sleep(1)
+            await asyncio.sleep(3)
             await self._next_phase()
             return
 

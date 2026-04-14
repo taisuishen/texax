@@ -10,7 +10,6 @@ let mySeat = -1;
 let turnTimerInterval = null;
 let turnTimerEnd = 0;
 let currentTimerSeat = -1;
-let shownCommunityCount = 0; // 已显示的公共牌数量
 
 // ─── 登录 ───
 
@@ -112,11 +111,6 @@ function handleGameState(state, userInfo) {
     const myPlayer = state.players.find(p => p.user_id === userId);
     if (myPlayer) mySeat = myPlayer.seat;
 
-    // 等待阶段重置公共牌计数
-    if (state.phase === 'waiting') {
-        shownCommunityCount = 0;
-    }
-
     renderTable(state);
     renderMyCards(state);
     renderActions(state);
@@ -167,7 +161,7 @@ function renderTable(state) {
         let cardsHtml = '';
         if (state.phase !== 'waiting') {
             if (p.hole_cards) {
-                cardsHtml = p.hole_cards.map(c => makeCardHtml(c, true, false)).join('');
+                cardsHtml = p.hole_cards.map(c => makeCardHtml(c, true)).join('');
             } else if (p.hole_cards_count > 0) {
                 cardsHtml = '<div class="card-back card-small"></div>'.repeat(p.hole_cards_count);
             }
@@ -186,8 +180,9 @@ function renderTable(state) {
         `;
     }
 
-    // 公共牌 (新牌逐张翻开, 每张间隔2秒)
-    renderCommunityCards(state.community_cards);
+    // 公共牌 (服务端控制节奏, 前端直接显示)
+    const ccEl = document.getElementById('community-cards');
+    ccEl.innerHTML = state.community_cards.map(c => makeCardHtml(c, false)).join('');
 
     // 底池
     document.getElementById('pot-display').textContent = `底池: $${state.main_pot}`;
@@ -200,48 +195,14 @@ function renderTable(state) {
     }
 }
 
-function makeCardHtml(card, isSmall, animate) {
+function makeCardHtml(card, isSmall) {
     const sizeClass = isSmall ? 'card-small' : '';
     const isRed = card.suit === '♥' || card.suit === '♦';
     const colorClass = isRed ? 'red' : 'black';
-    const animClass = animate ? 'deal-anim' : '';
-    return `<div class="card ${sizeClass} ${colorClass} ${animClass}">
+    return `<div class="card ${sizeClass} ${colorClass}">
         <span class="card-rank">${card.rank}</span>
         <span class="card-suit">${card.suit}</span>
     </div>`;
-}
-
-function renderCommunityCards(cards) {
-    const ccEl = document.getElementById('community-cards');
-    const totalCards = cards.length;
-    const alreadyShown = shownCommunityCount;
-
-    if (totalCards === 0) {
-        ccEl.innerHTML = '';
-        shownCommunityCount = 0;
-        return;
-    }
-
-    if (totalCards <= alreadyShown) {
-        // 没有新牌, 保持原样
-        return;
-    }
-
-    // 已有的牌直接显示 (无动画)
-    let html = '';
-    for (let i = 0; i < alreadyShown; i++) {
-        html += makeCardHtml(cards[i], false, false);
-    }
-    ccEl.innerHTML = html;
-
-    // 新牌逐张翻开, 每张间隔3秒
-    const newCards = cards.slice(alreadyShown);
-    newCards.forEach((card, idx) => {
-        setTimeout(() => {
-            ccEl.innerHTML += makeCardHtml(card, false, true);
-            shownCommunityCount = alreadyShown + idx + 1;
-        }, idx * 3000);
-    });
 }
 
 function renderMyCards(state) {
@@ -256,7 +217,7 @@ function renderMyCards(state) {
     }
 
     // ★ 手牌不做动画, 只在内容变化时才重新渲染
-    const newHtml = myP.hole_cards.map(c => makeCardHtml(c, false, false)).join('');
+    const newHtml = myP.hole_cards.map(c => makeCardHtml(c, false)).join('');
     if (cardsEl.dataset.cards !== JSON.stringify(myP.hole_cards)) {
         cardsEl.innerHTML = newHtml;
         cardsEl.dataset.cards = JSON.stringify(myP.hole_cards);
@@ -441,13 +402,13 @@ function showShowdown(results) {
 
         let cardsHtml = '';
         if (r.hole_cards) {
-            cardsHtml = r.hole_cards.map(c => makeCardHtml(c, true, false)).join('');
+            cardsHtml = r.hole_cards.map(c => makeCardHtml(c, true)).join('');
         }
 
         let bestHtml = '';
         if (r.best_hand && r.best_hand.best_five) {
             bestHtml = '<div class="result-cards">' +
-                r.best_hand.best_five.map(c => makeCardHtml(c, true, false)).join('') +
+                r.best_hand.best_five.map(c => makeCardHtml(c, true)).join('') +
                 '</div>';
         }
 

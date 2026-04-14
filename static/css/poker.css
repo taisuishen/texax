@@ -238,8 +238,7 @@ body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #1a1a
 @keyframes pulse { 0%, 100% { box-shadow: 0 0 15px rgba(240,165,0,0.6); } 50% { box-shadow: 0 0 25px rgba(240,165,0,0.9); } }
 .seat.active-turn { animation: pulse 1.5s infinite; }
 
-@keyframes dealCard { from { transform: scale(0) rotate(-180deg); opacity: 0; } to { transform: scale(1) rotate(0); opacity: 1; } }
-.card.deal-anim { animation: dealCard 0.3s ease-out; }
+/* 不使用翻牌动画, 由服务端控制发牌节奏 */
 
 /* ═══════════════════════════════════════════════
    手机端响应式适配 (宽度 <= 768px)
