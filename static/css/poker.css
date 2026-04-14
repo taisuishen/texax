@@ -256,7 +256,7 @@ body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #1a1a
     .top-bar .chips-badge { font-size: 11px; padding: 1px 6px; }
 
     /* 牌桌缩放 */
-    .table-container { padding-top: 40px; padding-bottom: 120px; align-items: flex-start; padding-top: 50px; }
+    .table-container { padding-top: 60px; padding-bottom: 130px; align-items: center; justify-content: center; }
     .poker-table {
         width: 360px; height: 200px; border-width: 6px; border-radius: 100px;
     }
