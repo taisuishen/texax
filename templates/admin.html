@@ -73,6 +73,13 @@
                     <input type="number" id="cfg-turn-timeout" min="5" max="120">
                     <label>最大玩家数</label>
                     <input type="number" id="cfg-max-players" min="2" max="9">
+                    <label>荷官形象（全桌统一，建议方形图片）</label>
+                    <input type="file" id="cfg-dealer-image" accept="image/*" onchange="loadDealerImage(event)">
+                    <div class="dealer-preview-wrap">
+                        <img id="cfg-dealer-preview" class="dealer-preview" alt="荷官预览" style="display:none">
+                        <span id="cfg-dealer-placeholder">🧑‍💼 默认荷官</span>
+                    </div>
+                    <button type="button" class="btn-secondary" onclick="clearDealerImage()">恢复默认荷官</button>
                     <button onclick="saveTableConfig()">保存设置</button>
                     <p id="config-msg" class="msg-text"></p>
                 </div>

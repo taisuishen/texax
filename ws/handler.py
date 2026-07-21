@@ -4,14 +4,16 @@ WebSocket 连接管理和消息处理
 import json
 import logging
 import asyncio
+from datetime import datetime, timezone
 from fastapi import WebSocket, WebSocketDisconnect
 from auth import decode_token, verify_password, create_player_token
 import redis_client
 from game.engine import GameEngine, GamePhase, PlayerStatus
+from avatar_config import DEFAULT_AVATAR_ID, is_valid_avatar
 
 logger = logging.getLogger("poker.ws")
 
-RECONNECT_GRACE_SECONDS = 15  # 断线重连宽限期
+RECONNECT_GRACE_SECONDS = 120  # 手机切后台或网络抖动时保留座位两分钟
 
 
 class ConnectionManager:
@@ -22,9 +24,30 @@ class ConnectionManager:
         self.ws_to_user: dict[int, str] = {}         # ws.id -> user_id
         self.game_engine: GameEngine | None = None
         self._disconnect_timers: dict[str, asyncio.Task] = {}  # user_id -> 延迟踢出task
+        self.session: dict = {"started_at": datetime.now(timezone.utc).isoformat(),
+                              "status": "active", "players": {}}
 
     def set_engine(self, engine: GameEngine):
         self.game_engine = engine
+
+    async def load_session(self):
+        saved = await redis_client.get_session()
+        if saved and saved.get("status") == "active":
+            self.session = saved
+
+    async def _save_session_player(self, player):
+        row = self.session["players"].setdefault(player.user_id, {
+            "username": player.username, "initial_buyin": player.initial_buyin,
+            "rebuy_count": 0, "rebuy_total": 0,
+        })
+        row.update({"username": player.username, "final_chips": player.chips,
+                    "rebuy_count": player.rebuy_count, "rebuy_total": player.rebuy_total,
+                    "net": player.chips - row["initial_buyin"] - player.rebuy_total})
+        await redis_client.save_session(self.session)
+
+    async def publish_message(self, message: dict):
+        await redis_client.append_table_message(message)
+        await self.broadcast({"type": "table_message", "data": message})
 
     async def connect(self, ws: WebSocket, user_id: str):
         # ★ 如果有待执行的断线踢出，取消它（用户刷新重连了）
@@ -140,6 +163,41 @@ class ConnectionManager:
         eng = engine or self.game_engine
         if not eng:
             return
+        if event == "hand_result" and eng.last_hand_results:
+            winners = [r for r in eng.last_hand_results if r.get("won", 0) > 0]
+            public_cards = " ".join(str(card) for card in eng.community_cards) or "无"
+            winner_summaries = []
+            for result in winners:
+                text = (f"{result['username']} 收下 {result['won']} 筹码"
+                        f"（净赢 {result.get('profit', result['won'])}）")
+                if result.get("best_hand"):
+                    hole_cards = " ".join(card["display"] for card in result.get("hole_cards", []))
+                    best_five = " ".join(card["display"] for card in result["best_hand"].get("best_five", []))
+                    text += (f"，底牌：{hole_cards}，牌型：{result['best_hand']['name']}"
+                             f"，最佳五张：{best_five}")
+                if result.get("reason"):
+                    text += f"，{result['reason']}"
+                if result.get("returned"):
+                    text += f"，退回未跟注 {result['returned']}"
+                winner_summaries.append(text)
+            summary = f"公共牌：{public_cards}；" + "；".join(winner_summaries)
+            other_refunds = [f"{r['username']} 退回未跟注 {r['returned']}"
+                             for r in eng.last_hand_results
+                             if r.get("returned") and r not in winners]
+            if other_refunds:
+                summary += "；" + "；".join(other_refunds)
+            eng.last_hand_summary = f"第 {eng.hand_number} 手：{summary}"
+            await self.publish_message({"kind": "system", "event": "hand_result",
+                                        "hand_number": eng.hand_number,
+                                        "text": eng.last_hand_summary})
+        elif event == "cards_revealed" and eng.revealed_user_ids:
+            uid = next(iter(eng.revealed_user_ids))
+            player = eng.get_player(uid)
+            if player:
+                cards = " ".join(f"{c.rank}{c.suit}" for c in player.hole_cards)
+                eng.last_hand_summary += f"；{player.username} 主动亮牌：{cards}"
+                await self.publish_message({"kind": "system", "event": "cards_revealed",
+                                            "text": f"{player.username} 选择亮牌：{cards}"})
         for uid, ws in list(self.connections.items()):
             state = eng.get_state(for_user_id=uid)
             state["event"] = event
@@ -170,21 +228,35 @@ class ConnectionManager:
                 return
 
             username = user_data.get("username", user_id)
-            ok = engine.sit_down(user_id, username, chips, seat)
+            avatar_id = user_data.get("avatar_id", DEFAULT_AVATAR_ID)
+            if not is_valid_avatar(avatar_id):
+                avatar_id = DEFAULT_AVATAR_ID
+            ok = engine.sit_down(user_id, username, chips, seat, avatar_id)
             if ok:
+                seated = engine.get_player(user_id)
+                previous = self.session["players"].get(user_id)
+                if previous:
+                    seated.initial_buyin = previous.get("initial_buyin", chips)
+                    seated.rebuy_count = previous.get("rebuy_count", 0)
+                    seated.rebuy_total = previous.get("rebuy_total", 0)
+                await self._save_session_player(seated)
                 await self.broadcast_game_state("player_sit")
             else:
                 await self.send_personal(user_id, {"type": "error", "message": "该座位已被占用或无效"})
 
         elif msg_type == "stand_up":
-            ok = engine.stand_up(user_id)
-            if ok:
+            leaving = engine.get_player(user_id)
+            if leaving:
+                await self._save_session_player(leaving)
                 player_data = await redis_client.get_user(user_id)
                 if player_data:
+                    player_data["chips"] = leaving.chips
                     await redis_client.save_user(user_id, player_data)
+            ok = engine.stand_up(user_id)
+            if ok:
                 await self.broadcast_game_state("player_leave")
             else:
-                await self.send_personal(user_id, {"type": "error", "message": "无法离开 (游戏进行中)"})
+                await self.send_personal(user_id, {"type": "error", "message": "准备后座位已锁定；请先取消准备，或在游戏中选择本手后离桌"})
 
         elif msg_type == "ready":
             player = engine.get_player(user_id)
@@ -197,6 +269,15 @@ class ConnectionManager:
             if player.is_ready:
                 await engine.try_start_game()
 
+        elif msg_type == "leave_after_hand":
+            if engine.request_leave_after_hand(user_id):
+                await self.broadcast_game_state("leave_after_hand")
+            else:
+                player = engine.get_player(user_id)
+                message = ("你已因操作超时被标记为本手结束后离座"
+                           if player and player.timed_out else "你还没有坐下")
+                await self.send_personal(user_id, {"type": "error", "message": message})
+
         elif msg_type == "action":
             action = data.get("action", "")
             amount = data.get("amount", 0)
@@ -205,14 +286,52 @@ class ConnectionManager:
                 await self.send_personal(user_id, {"type": "error", "message": result["error"]})
 
         elif msg_type == "chat":
-            text = data.get("text", "").strip()
+            text = str(data.get("text", "")).strip()[:300]
             if text:
                 player = engine.get_player(user_id)
                 name = player.username if player else user_id
-                await self.broadcast({
-                    "type": "chat",
-                    "data": {"user_id": user_id, "username": name, "text": text}
-                })
+                await self.publish_message({"kind": "chat", "user_id": user_id,
+                                            "username": name, "text": text})
+
+        elif msg_type == "show_cards_choice":
+            result = await engine.choose_show_cards(user_id, bool(data.get("show")))
+            if not result["ok"]:
+                await self.send_personal(user_id, {"type": "error", "message": result["error"]})
+
+        elif msg_type == "rebuy":
+            amount = engine.big_blind * 50
+            result = await engine.rebuy(user_id, amount)
+            if result["ok"]:
+                player = engine.get_player(user_id)
+                await self._save_session_player(player)
+                await self.publish_message({"kind": "system", "event": "rebuy",
+                    "text": f"{player.username} 借入 {amount} 筹码（第 {player.rebuy_count} 次）"})
+            else:
+                await self.send_personal(user_id, {"type": "error", "message": result["error"]})
+
+        elif msg_type == "settlement":
+            for player in engine.players.values():
+                await self._save_session_player(player)
+            rows = list(self.session["players"].values())
+            await self.send_personal(user_id, {"type": "settlement", "data": rows})
+
+        elif msg_type == "update_avatar":
+            avatar_id = str(data.get("avatar_id", ""))
+            if not is_valid_avatar(avatar_id):
+                await self.send_personal(user_id, {"type": "error", "message": "头像无效"})
+                return
+            user_data = await redis_client.get_user(user_id)
+            if not user_data:
+                await self.send_personal(user_id, {"type": "error", "message": "用户不存在"})
+                return
+            user_data["avatar_id"] = avatar_id
+            await redis_client.save_user(user_id, user_data)
+            player = engine.get_player(user_id)
+            if player:
+                player.avatar_id = avatar_id
+                await self.broadcast_game_state("avatar_updated")
+            await self.send_personal(user_id, {"type": "profile_updated",
+                                               "avatar_id": avatar_id})
 
         elif msg_type == "get_state":
             state = engine.get_state(for_user_id=user_id)
@@ -241,6 +360,10 @@ async def websocket_endpoint(ws: WebSocket):
 
     user_id = payload["sub"]
     username = payload.get("username", user_id)
+    user_data = await redis_client.get_user(user_id)
+    avatar_id = (user_data or {}).get("avatar_id", DEFAULT_AVATAR_ID)
+    if not is_valid_avatar(avatar_id):
+        avatar_id = DEFAULT_AVATAR_ID
 
     await manager.connect(ws, user_id)
 
@@ -250,8 +373,11 @@ async def websocket_endpoint(ws: WebSocket):
     await ws.send_json({
         "type": "game_state",
         "data": state,
-        "user_info": {"user_id": user_id, "username": username},
+        "user_info": {"user_id": user_id, "username": username,
+                      "avatar_id": avatar_id},
     })
+    await ws.send_json({"type": "message_history",
+                        "data": await redis_client.get_recent_table_messages(50)})
 
     try:
         while True:

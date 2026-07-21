@@ -2,9 +2,9 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
     <title>德州扑克</title>
-    <link rel="stylesheet" href="/static/css/poker.css">
+    <link rel="stylesheet" href="/static/css/poker.css?v=20260721-mobile9">
 </head>
 <body>
     <!-- 登录界面 -->
@@ -12,10 +12,24 @@
         <div class="login-box">
             <h1>♠ 德州扑克 ♥</h1>
             <p class="subtitle">Texas Hold'em Online</p>
-            <input type="text" id="login-username" placeholder="用户名" autocomplete="off">
-            <input type="password" id="login-password" placeholder="密码">
-            <button id="btn-login" onclick="doLogin()">进入游戏</button>
-            <p id="login-error" class="error-text"></p>
+            <div class="auth-tabs">
+                <button id="tab-login" class="active" onclick="showAuthMode('login')">登录</button>
+                <button id="tab-register" onclick="showAuthMode('register')">注册</button>
+            </div>
+            <div id="login-form">
+                <input type="text" id="login-username" placeholder="用户名" autocomplete="username">
+                <input type="password" id="login-password" placeholder="密码" autocomplete="current-password">
+                <button id="btn-login" onclick="doLogin()">进入游戏</button>
+                <p id="login-error" class="error-text"></p>
+            </div>
+            <div id="register-form" style="display:none">
+                <input type="text" id="register-username" placeholder="用户名（2～20 个字符）" autocomplete="username">
+                <input type="password" id="register-password" placeholder="密码（至少 4 位）" autocomplete="new-password">
+                <p class="avatar-picker-title">选择头像</p>
+                <div id="register-avatar-picker" class="avatar-picker"></div>
+                <button onclick="doRegister()">注册并进入游戏</button>
+                <p id="register-error" class="error-text"></p>
+            </div>
         </div>
     </div>
 
@@ -24,6 +38,9 @@
         <!-- 顶部信息栏 -->
         <div class="top-bar">
             <div class="user-info">
+                <button class="top-avatar-button" title="修改头像" onclick="openAvatarModal()">
+                    <img id="display-avatar" src="/static/avatars/avatar-01.svg" alt="我的头像">
+                </button>
                 <span id="display-username"></span>
                 <span id="display-chips" class="chips-badge"></span>
             </div>
@@ -32,24 +49,33 @@
                 <span id="display-hand-num"></span>
             </div>
             <button class="btn-small" onclick="toggleChat()">💬</button>
+            <button class="btn-small" onclick="requestSettlement()">结算</button>
+            <button id="btn-leave-after" class="btn-small" style="display:none" onclick="toggleLeaveAfterHand()">本手后离桌</button>
         </div>
 
         <!-- 牌桌 -->
         <div class="table-container">
             <div class="poker-table">
+                <div id="dealer-avatar" class="dealer-avatar">
+                    <img id="dealer-image" alt="荷官" style="display:none">
+                    <span id="dealer-fallback">🧑‍💼</span>
+                </div>
                 <!-- 公共牌区 -->
                 <div class="community-area">
                     <div id="community-cards" class="card-row"></div>
                     <div id="pot-display" class="pot">底池: 0</div>
                 </div>
 
-                <!-- 6个座位 -->
+                <!-- 最多9个座位 -->
                 <div id="seat-0" class="seat seat-pos-0" onclick="clickSeat(0)"></div>
                 <div id="seat-1" class="seat seat-pos-1" onclick="clickSeat(1)"></div>
                 <div id="seat-2" class="seat seat-pos-2" onclick="clickSeat(2)"></div>
                 <div id="seat-3" class="seat seat-pos-3" onclick="clickSeat(3)"></div>
                 <div id="seat-4" class="seat seat-pos-4" onclick="clickSeat(4)"></div>
                 <div id="seat-5" class="seat seat-pos-5" onclick="clickSeat(5)"></div>
+                <div id="seat-6" class="seat seat-pos-6" onclick="clickSeat(6)"></div>
+                <div id="seat-7" class="seat seat-pos-7" onclick="clickSeat(7)"></div>
+                <div id="seat-8" class="seat seat-pos-8" onclick="clickSeat(8)"></div>
 
                 <!-- 计时器 (动态挂到座位上) -->
             </div>
@@ -77,22 +103,61 @@
             <button id="btn-standup" class="btn-action btn-fold" onclick="doStandUp()">离座</button>
         </div>
 
-        <!-- 摊牌结果 -->
-        <div id="showdown-overlay" class="showdown-overlay" style="display:none">
-            <div class="showdown-content">
-                <h2>🏆 本局结果</h2>
-                <div id="showdown-results"></div>
-                <button onclick="closeShowdown()">继续</button>
+        <div id="win-banner" class="win-banner" style="display:none"></div>
+        <div id="chip-animation-layer" class="chip-animation-layer"></div>
+
+        <div id="rebuy-modal" class="choice-overlay" style="display:none">
+            <div class="choice-card"><h2>筹码已用完</h2><p id="rebuy-description"></p>
+                <div><button class="btn-action btn-ready" onclick="doRebuy()">借钱买入</button>
+                <button class="btn-action btn-fold" onclick="doStandUp()">离桌</button></div>
+            </div>
+        </div>
+
+        <div id="settlement-modal" class="choice-overlay" style="display:none">
+            <div class="choice-card settlement-card"><h2>朋友局结算</h2>
+                <div id="settlement-results"></div>
+                <button class="btn-action btn-call" onclick="closeSettlement()">关闭</button>
+            </div>
+        </div>
+
+        <div id="avatar-modal" class="choice-overlay" style="display:none" onclick="closeAvatarModal(event)">
+            <div class="choice-card avatar-choice-card" onclick="event.stopPropagation()">
+                <h2>选择头像</h2>
+                <div id="profile-avatar-picker" class="avatar-picker profile-avatar-picker"></div>
+                <div class="avatar-modal-actions">
+                    <button class="btn-action btn-call" onclick="saveAvatar()">保存头像</button>
+                    <button class="btn-action btn-fold" onclick="closeAvatarModal()">取消</button>
+                </div>
             </div>
         </div>
 
         <!-- 聊天面板 -->
         <div id="chat-panel" class="chat-panel" style="display:none">
             <div class="chat-header">
-                <span>聊天</span>
+                <span>聊天与牌局记录</span>
                 <button onclick="toggleChat()">✕</button>
             </div>
+            <div id="last-hand-summary" class="last-hand-summary">
+                <span>上一手</span><p>暂无战果</p>
+            </div>
             <div id="chat-messages" class="chat-messages"></div>
+            <div class="quick-chat">
+                <div class="quick-chat-row emoji-row">
+                    <button onclick="sendQuickChat('😂')">😂</button>
+                    <button onclick="sendQuickChat('😎')">😎</button>
+                    <button onclick="sendQuickChat('🤔')">🤔</button>
+                    <button onclick="sendQuickChat('🔥')">🔥</button>
+                    <button onclick="sendQuickChat('👍')">👍</button>
+                    <button onclick="sendQuickChat('🍀')">🍀</button>
+                </div>
+                <div class="quick-chat-row phrase-row">
+                    <button onclick="sendQuickChat('快点吧，等到花儿都谢了 🌸')">快点吧</button>
+                    <button onclick="sendQuickChat('该你了 👀')">该你了</button>
+                    <button onclick="sendQuickChat('想什么呢？🤔')">想什么呢</button>
+                    <button onclick="sendQuickChat('Nice hand!')">Nice hand</button>
+                    <button onclick="sendQuickChat('Good luck! 🍀')">Good luck</button>
+                </div>
+            </div>
             <div class="chat-input-area">
                 <input type="text" id="chat-input" placeholder="输入消息..." onkeydown="if(event.key==='Enter')sendChat()">
                 <button onclick="sendChat()">发送</button>
@@ -100,6 +165,6 @@
         </div>
     </div>
 
-    <script src="/static/js/poker.js"></script>
+    <script src="/static/js/poker.js?v=20260721-mobile8"></script>
 </body>
 </html>

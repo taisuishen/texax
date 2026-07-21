@@ -1,6 +1,7 @@
 import redis.asyncio as aioredis
 import json
 import config
+from datetime import datetime, timezone
 
 pool = None
 
@@ -59,7 +60,33 @@ async def get_table_config() -> dict:
         "big_blind": config.DEFAULT_BIG_BLIND,
         "turn_timeout": config.DEFAULT_TURN_TIMEOUT,
         "max_players": config.MAX_PLAYERS,
+        "dealer_image": "",
     }
+
+
+async def append_table_message(message: dict, limit: int = 200):
+    """保存牌桌聊天和系统消息，仅保留最近若干条。"""
+    r = await get_redis()
+    message.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+    await r.rpush("table:messages", json.dumps(message, ensure_ascii=False))
+    await r.ltrim("table:messages", -limit, -1)
+
+
+async def get_recent_table_messages(limit: int = 50) -> list[dict]:
+    r = await get_redis()
+    rows = await r.lrange("table:messages", -limit, -1)
+    return [json.loads(row) for row in rows]
+
+
+async def save_session(session: dict):
+    r = await get_redis()
+    await r.set("table:session", json.dumps(session, ensure_ascii=False))
+
+
+async def get_session() -> dict | None:
+    r = await get_redis()
+    raw = await r.get("table:session")
+    return json.loads(raw) if raw else None
 
 
 async def close_redis():

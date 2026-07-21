@@ -4,6 +4,9 @@
 """
 import asyncio
 import logging
+import hashlib
+import math
+import time
 from enum import Enum
 from dataclasses import dataclass, field
 from game.deck import Deck, Card
@@ -35,6 +38,7 @@ class Player:
     username: str
     seat: int
     chips: int = 0
+    avatar_id: str = "avatar-01"
     hole_cards: list[Card] = field(default_factory=list)
     status: PlayerStatus = PlayerStatus.SITTING
     current_bet: int = 0
@@ -42,6 +46,13 @@ class Player:
     is_ready: bool = False
     last_action: str = ""
     last_action_amount: int = 0
+    action_serial: int = 0
+    initial_buyin: int = 0
+    rebuy_count: int = 0
+    rebuy_total: int = 0
+    pending_rebuy: bool = False
+    leave_after_hand: bool = False
+    timed_out: bool = False
 
     def reset_for_hand(self):
         self.hole_cards = []
@@ -57,12 +68,20 @@ class Player:
             "username": self.username,
             "seat": self.seat,
             "chips": self.chips,
+            "avatar_id": self.avatar_id,
             "status": self.status.value,
             "current_bet": self.current_bet,
             "total_bet": self.total_bet,
             "is_ready": self.is_ready,
             "last_action": self.last_action,
             "last_action_amount": self.last_action_amount,
+            "action_serial": self.action_serial,
+            "initial_buyin": self.initial_buyin,
+            "rebuy_count": self.rebuy_count,
+            "rebuy_total": self.rebuy_total,
+            "pending_rebuy": self.pending_rebuy,
+            "leave_after_hand": self.leave_after_hand,
+            "timed_out": self.timed_out,
         }
         if show_cards:
             data["hole_cards"] = [c.to_dict() for c in self.hole_cards]
@@ -99,6 +118,8 @@ class GameEngine:
         self.big_blind = 20
         self.turn_timeout = 30
         self.max_players = 6
+        self.dealer_image = ""
+        self.dealer_image_revision = ""
 
         self.current_bet = 0
         self.min_raise = 0
@@ -107,6 +128,8 @@ class GameEngine:
         self._players_to_act: set[int] = set()
 
         self._turn_timer_task: asyncio.Task | None = None
+        self.turn_id = 0
+        self.turn_deadline = 0.0
         self._broadcast = broadcast_callback
         self._is_online = is_online_callback
         self._save_chips = save_chips_callback  # 保存玩家筹码到Redis
@@ -114,23 +137,36 @@ class GameEngine:
 
         self.hand_number = 0
         self.last_hand_results: list | None = None
+        self.last_hand_summary = ""
+        self.revealed_user_ids: set[str] = set()
+        self.pending_show_user_id: str | None = None
+        self._show_choice_task: asyncio.Task | None = None
+        self.all_in_runout = False
+        self.dealing = False
+        self._next_hand_task: asyncio.Task | None = None
 
-    def update_config(self, small_blind: int, big_blind: int, turn_timeout: int, max_players: int):
+    def update_config(self, small_blind: int, big_blind: int, turn_timeout: int,
+                      max_players: int, dealer_image: str = ""):
         self.small_blind = small_blind
         self.big_blind = big_blind
         self.turn_timeout = turn_timeout
         self.max_players = max_players
+        self.dealer_image = dealer_image
+        self.dealer_image_revision = hashlib.sha256(dealer_image.encode()).hexdigest()[:12] if dealer_image else ""
 
     # ─── 座位管理 ───
 
-    def sit_down(self, user_id: str, username: str, chips: int, seat: int) -> bool:
+    def sit_down(self, user_id: str, username: str, chips: int, seat: int,
+                 avatar_id: str = "avatar-01") -> bool:
         if seat in self.seats:
             return False
         if seat < 0 or seat >= self.max_players:
             return False
         if user_id in self.players:
             return False
-        player = Player(user_id=user_id, username=username, seat=seat, chips=chips)
+        player = Player(user_id=user_id, username=username, seat=seat, chips=chips,
+                        avatar_id=avatar_id,
+                        initial_buyin=chips)
         self.players[user_id] = player
         self.seats[seat] = user_id
         return True
@@ -138,13 +174,23 @@ class GameEngine:
     def stand_up(self, user_id: str) -> bool:
         if user_id not in self.players:
             return False
+        player = self.players[user_id]
+        if self.phase == GamePhase.WAITING and player.is_ready:
+            return False
         if self.phase != GamePhase.WAITING:
-            player = self.players[user_id]
             if player.status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN):
                 return False
-        player = self.players[user_id]
         del self.seats[player.seat]
         del self.players[user_id]
+        return True
+
+    def request_leave_after_hand(self, user_id: str) -> bool:
+        player = self.players.get(user_id)
+        if not player:
+            return False
+        if player.timed_out:
+            return False
+        player.leave_after_hand = not player.leave_after_hand
         return True
 
     def get_player(self, user_id: str) -> Player | None:
@@ -186,9 +232,12 @@ class GameEngine:
     async def try_start_game(self) -> bool:
         if self.phase not in (GamePhase.WAITING, GamePhase.SETTLING):
             return False
-        ready_players = [p for p in self.players.values() if p.is_ready and p.chips > 0]
-        if len(ready_players) < 2:
+        seated_players = list(self.players.values())
+        if len(seated_players) < 2:
             return False
+        if any(p.chips <= 0 or not p.is_ready for p in seated_players):
+            return False
+        ready_players = seated_players
         # 如果在结算阶段, 先清空牌桌
         if self.phase == GamePhase.SETTLING:
             await self._reset_for_next_hand()
@@ -202,6 +251,10 @@ class GameEngine:
         self.pots = []
         self.main_pot = 0
         self.last_hand_results = None
+        self.revealed_user_ids.clear()
+        self.pending_show_user_id = None
+        self.all_in_runout = False
+        self.dealing = False
         self._players_to_act.clear()
 
         for p in participants:
@@ -250,8 +303,14 @@ class GameEngine:
                     f"SB={self.small_blind_seat} BB={self.big_blind_seat} "
                     f"First={first} ToAct={self._players_to_act}")
 
+        # 先让客户端完成洗牌和逐张发牌，再公开真实手牌并开始行动计时。
+        self.dealing = True
         await self._broadcast_state("hand_start")
+        if self._broadcast:
+            await asyncio.sleep(2.35 + len(participants) * 0.46)
+        self.dealing = False
         await self._start_turn_timer()
+        await self._broadcast_state("deal_complete")
 
     def _place_bet(self, player: Player, amount: int):
         actual = min(amount, player.chips)
@@ -273,6 +332,8 @@ class GameEngine:
             return {"ok": False, "error": "你不在桌上"}
         if self.phase in (GamePhase.WAITING, GamePhase.SHOWDOWN, GamePhase.SETTLING):
             return {"ok": False, "error": "当前不是行动阶段"}
+        if self.dealing:
+            return {"ok": False, "error": "荷官正在发牌，请稍候"}
         if player.seat != self.current_player_seat:
             return {"ok": False, "error": "还没轮到你"}
         if player.status != PlayerStatus.ACTIVE:
@@ -330,6 +391,9 @@ class GameEngine:
         else:
             return {"ok": False, "error": f"未知行动: {action}"}
 
+        # 每个成功动作分配唯一序号，客户端据此保证音效只播放一次。
+        player.action_serial += 1
+
         # ★ 从待行动集合中移除当前玩家
         self._players_to_act.discard(player.seat)
 
@@ -343,7 +407,8 @@ class GameEngine:
                     f"amount={amount} did_raise={did_raise} "
                     f"remaining_to_act={self._players_to_act}")
 
-        # ★ 不在这里广播，让 _advance_game 在最终状态确定后统一广播
+        # 先确认动作，让客户端立即看到 All-in/跟注等反馈；随后再执行可能较慢的跑牌动画。
+        await self._broadcast_state("player_action")
         await self._advance_game()
 
         return {"ok": True, "action": action}
@@ -356,18 +421,26 @@ class GameEngine:
         if len(active_seats) == 1:
             winner_uid = self.seats[active_seats[0]]
             winner = self.players[winner_uid]
-            winner.chips += self.main_pot
+            pots, refunds = self._calculate_pots()
+            for uid, amount in refunds.items():
+                self.players[uid].chips += amount
+            contested_total = sum(amount for amount, _ in pots)
+            winner.chips += contested_total
+            self.main_pot = contested_total
+            effective_bet = winner.total_bet - refunds.get(winner_uid, 0)
             self.last_hand_results = [{
                 "user_id": winner_uid,
                 "username": winner.username,
-                "won": self.main_pot,
+                "won": contested_total,
+                "profit": contested_total - effective_bet,
+                "returned": refunds.get(winner_uid, 0),
                 "hand": None,
                 "reason": "其他玩家弃牌",
             }]
             self.phase = GamePhase.SHOWDOWN
-            await self._broadcast_state("hand_end")
-            await asyncio.sleep(2)
-            await self._enter_settling()
+            self.pending_show_user_id = winner_uid
+            await self._broadcast_state("hand_result")
+            self._show_choice_task = asyncio.create_task(self._show_choice_timeout(winner_uid))
             return
 
         # ★ 只看还在 _players_to_act 中且仍 ACTIVE 的座位
@@ -375,6 +448,13 @@ class GameEngine:
         self._players_to_act = remaining
 
         if not remaining:
+            if self._reveal_all_in_players():
+                await self._broadcast_state("all_in_reveal")
+            actor_uid = self.seats.get(self.current_player_seat)
+            actor = self.players.get(actor_uid) if actor_uid else None
+            if actor and actor.last_action == "过牌":
+                # 最后一名玩家过牌时，先留出敲桌音效的播放时间，再进入下一街。
+                await asyncio.sleep(0.35)
             # 当前下注轮结束 → 进入下一阶段
             logger.info(f"Betting round complete in phase {self.phase.value}, advancing...")
             await self._next_phase()
@@ -387,10 +467,22 @@ class GameEngine:
                 return
             self.current_player_seat = next_s
             logger.info(f"Next to act: seat {next_s}, remaining={remaining}")
-            await self._broadcast_state("next_turn")
             await self._start_turn_timer()
+            await self._broadcast_state("next_turn")
+
+    def _reveal_all_in_players(self) -> bool:
+        live_players = [p for p in self.players.values()
+                        if p.status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN)]
+        if len(live_players) < 2 or not all(p.status == PlayerStatus.ALL_IN for p in live_players):
+            return False
+        self.revealed_user_ids.update(p.user_id for p in live_players)
+        return True
 
     async def _next_phase(self):
+        active_count = len(self._get_active_seats())
+        if len(self._get_acting_seats()) <= 1 and active_count >= 2:
+            self.all_in_runout = True
+
         # 重置所有人的下注轮状态
         for p in self.players.values():
             if p.status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN):
@@ -402,20 +494,23 @@ class GameEngine:
 
         if self.phase == GamePhase.PRE_FLOP:
             self.phase = GamePhase.FLOP
-            # 翻牌: 3张逐张发, 间隔1秒
+            # All-in 跑牌时 Flop 仍保持正常速度。
             for i in range(3):
                 self.community_cards.extend(self.deck.deal(1))
                 await self._broadcast_state("new_card")
                 if i < 2:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(0.65)
         elif self.phase == GamePhase.FLOP:
             self.phase = GamePhase.TURN
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(0.65)
             self.community_cards.extend(self.deck.deal(1))
+            await self._broadcast_state("new_card")
         elif self.phase == GamePhase.TURN:
             self.phase = GamePhase.RIVER
-            await asyncio.sleep(1.5)
+            # 只有 River 在 All-in 跑牌时增加悬疑停顿。
+            await asyncio.sleep(2.2 if self.all_in_runout else 0.8)
             self.community_cards.extend(self.deck.deal(1))
+            await self._broadcast_state("new_card")
         elif self.phase == GamePhase.RIVER:
             await self._showdown()
             return
@@ -425,7 +520,7 @@ class GameEngine:
         # 所有人都all-in了 → 直接跳到下一阶段发牌
         if len(acting_seats) <= 1:
             await self._broadcast_state("new_phase")
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(0.5)
             await self._next_phase()
             return
 
@@ -438,19 +533,25 @@ class GameEngine:
 
         logger.info(f"New phase: {self.phase.value} first_to_act={first} to_act={self._players_to_act}")
 
-        await self._broadcast_state("new_phase")
         await self._start_turn_timer()
+        await self._broadcast_state("new_phase")
 
     async def _showdown(self):
         self.phase = GamePhase.SHOWDOWN
         self.current_player_seat = -1
         active_players = [p for p in self.players.values()
                           if p.status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN)]
+        self.revealed_user_ids = {p.user_id for p in active_players}
 
-        pots = self._calculate_pots()
+        pots, refunds = self._calculate_pots()
 
         self.last_hand_results = []
         total_awarded = {}
+
+        # 无人匹配的超额下注不是边池，直接退回原下注者。
+        for uid, amount in refunds.items():
+            self.players[uid].chips += amount
+        self.main_pot = sum(amount for amount, _ in pots)
 
         for pot_amount, eligible_uids in pots:
             hands = []
@@ -477,21 +578,71 @@ class GameEngine:
             all_cards = p.hole_cards + self.community_cards
             result = evaluate(all_cards)
             won = total_awarded.get(p.user_id, 0)
+            effective_bet = p.total_bet - refunds.get(p.user_id, 0)
             self.last_hand_results.append({
                 "user_id": p.user_id,
                 "username": p.username,
                 "hole_cards": [c.to_dict() for c in p.hole_cards],
                 "best_hand": result.to_dict(),
                 "won": won,
+                "profit": won - effective_bet,
+                "returned": refunds.get(p.user_id, 0),
             })
 
-        await self._broadcast_state("showdown")
+        await self._broadcast_state("hand_result")
 
         # ★ 进入结算展示阶段, 保留公共牌和手牌, 等所有人准备后才开始下一局
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
         await self._enter_settling()
 
-    def _calculate_pots(self) -> list[tuple[int, list[str]]]:
+    async def choose_show_cards(self, user_id: str, show: bool) -> dict:
+        if user_id != self.pending_show_user_id:
+            return {"ok": False, "error": "当前没有需要你确认的亮牌选择"}
+        if self._show_choice_task and not self._show_choice_task.done():
+            self._show_choice_task.cancel()
+        if show:
+            self.revealed_user_ids.add(user_id)
+        self.pending_show_user_id = None
+        await self._broadcast_state("cards_revealed" if show else "cards_mucked")
+        await asyncio.sleep(0.5)
+        await self._enter_settling()
+        return {"ok": True}
+
+    async def _show_choice_timeout(self, user_id: str):
+        try:
+            await asyncio.sleep(3)
+            if self.pending_show_user_id == user_id:
+                self.pending_show_user_id = None
+                await self._broadcast_state("cards_mucked")
+                await asyncio.sleep(0.5)
+                await self._enter_settling()
+        except asyncio.CancelledError:
+            pass
+
+    async def rebuy(self, user_id: str, amount: int) -> dict:
+        player = self.players.get(user_id)
+        if not player or not player.pending_rebuy:
+            return {"ok": False, "error": "当前不需要补充筹码"}
+        if amount <= 0 or amount > self.big_blind * 500:
+            return {"ok": False, "error": "补充筹码金额无效"}
+        player.chips += amount
+        player.rebuy_count += 1
+        player.rebuy_total += amount
+        player.pending_rebuy = False
+        if self._save_chips:
+            await self._save_chips(user_id, player.chips)
+        await self._broadcast_state("player_rebuy")
+        return {"ok": True, "amount": amount, "rebuy_count": player.rebuy_count}
+
+    def get_settlement(self) -> list[dict]:
+        return [{
+            "user_id": p.user_id, "username": p.username,
+            "initial_buyin": p.initial_buyin, "rebuy_count": p.rebuy_count,
+            "rebuy_total": p.rebuy_total, "final_chips": p.chips,
+            "net": p.chips - p.initial_buyin - p.rebuy_total,
+        } for p in sorted(self.players.values(), key=lambda item: item.seat)]
+
+    def _calculate_pots(self) -> tuple[list[tuple[int, list[str]]], dict[str, int]]:
         active_bets = []
         for p in self.players.values():
             if p.status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN, PlayerStatus.FOLDED):
@@ -499,49 +650,26 @@ class GameEngine:
                     active_bets.append((p.user_id, p.total_bet, p.status))
 
         if not active_bets:
-            return []
+            return [], {}
 
-        all_in_amounts = sorted(set(
-            bet for uid, bet, status in active_bets
-            if status == PlayerStatus.ALL_IN
-        ))
-
-        eligible = [uid for uid, bet, status in active_bets
-                     if status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN)]
-
-        if not all_in_amounts:
-            return [(self.main_pot, eligible)]
-
-        pots = []
+        # 按每一个下注层切分底池。只有一个人覆盖的层级属于未跟注筹码，必须退回。
+        levels = sorted({bet for _, bet, _ in active_bets})
+        pots: list[tuple[int, list[str]]] = []
+        refunds: dict[str, int] = {}
         prev_level = 0
-
-        for level in all_in_amounts:
-            pot_amount = 0
-            pot_eligible = []
-            for uid, bet, status in active_bets:
-                contribution = min(bet, level) - min(bet, prev_level)
-                pot_amount += contribution
-                if bet >= level and status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN):
-                    pot_eligible.append(uid)
-            if pot_amount > 0 and pot_eligible:
-                pots.append((pot_amount, pot_eligible))
+        for level in levels:
+            contributors = [(uid, status) for uid, bet, status in active_bets if bet >= level]
+            layer_amount = (level - prev_level) * len(contributors)
+            if len(contributors) == 1:
+                uid = contributors[0][0]
+                refunds[uid] = refunds.get(uid, 0) + layer_amount
+            else:
+                eligible = [uid for uid, status in contributors
+                            if status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN)]
+                if layer_amount > 0 and eligible:
+                    pots.append((layer_amount, eligible))
             prev_level = level
-
-        remaining = 0
-        remaining_eligible = []
-        for uid, bet, status in active_bets:
-            contribution = bet - min(bet, prev_level)
-            remaining += contribution
-            if contribution > 0 and status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN) and bet > prev_level:
-                remaining_eligible.append(uid)
-
-        if remaining > 0 and remaining_eligible:
-            pots.append((remaining, remaining_eligible))
-
-        if not pots:
-            return [(self.main_pot, eligible)]
-
-        return pots
+        return pots, refunds
 
     async def _enter_settling(self):
         """进入结算展示阶段: 保留公共牌和结果, 等所有人准备后开始下一局"""
@@ -555,11 +683,11 @@ class GameEngine:
             for uid, p in self.players.items():
                 await self._save_chips(uid, p.chips)
 
-        # 踢掉断线/破产的玩家
+        # 断线玩家及已选择“本手后离桌”的玩家离桌；破产玩家等待本人选择。
         to_remove = []
         for uid, p in self.players.items():
             is_online = self._is_online(uid) if self._is_online else True
-            if not is_online or p.chips <= 0:
+            if not is_online or p.leave_after_hand:
                 to_remove.append(uid)
         for uid in to_remove:
             p = self.players[uid]
@@ -569,13 +697,26 @@ class GameEngine:
 
         # 重置玩家状态但不清手牌和公共牌
         for p in self.players.values():
+            participated = p.status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN, PlayerStatus.FOLDED)
             p.current_bet = 0
             p.total_bet = 0
             p.last_action = ""
             p.status = PlayerStatus.SITTING
-            p.is_ready = False
+            # 第一手准备后持续参与，不再要求每一手重复点击准备。
+            p.is_ready = participated and p.chips > 0
+            p.pending_rebuy = p.chips <= 0
 
         await self._broadcast_state("settling")
+        if self._next_hand_task and not self._next_hand_task.done():
+            self._next_hand_task.cancel()
+        self._next_hand_task = asyncio.create_task(self._auto_start_next_hand())
+
+    async def _auto_start_next_hand(self):
+        try:
+            await asyncio.sleep(3)
+            await self.try_start_game()
+        except asyncio.CancelledError:
+            pass
 
     async def _reset_for_next_hand(self):
         """所有人准备后调用: 清空牌桌, 开始新一局"""
@@ -598,12 +739,16 @@ class GameEngine:
 
     async def _start_turn_timer(self):
         self._cancel_turn_timer()
+        self.turn_id += 1
+        self.turn_deadline = time.time() + self.turn_timeout
         self._turn_timer_task = asyncio.create_task(self._turn_timeout_handler())
 
     def _cancel_turn_timer(self):
-        if self._turn_timer_task and not self._turn_timer_task.done():
-            self._turn_timer_task.cancel()
-            self._turn_timer_task = None
+        task = self._turn_timer_task
+        self._turn_timer_task = None
+        self.turn_deadline = 0.0
+        if task and task is not asyncio.current_task() and not task.done():
+            task.cancel()
 
     async def _turn_timeout_handler(self):
         try:
@@ -616,11 +761,11 @@ class GameEngine:
             player = self.players.get(uid)
             if not player or player.status != PlayerStatus.ACTIVE:
                 return
-            call_amount = self.current_bet - player.current_bet
-            if call_amount <= 0:
-                await self.player_action(uid, "check")
-            else:
-                await self.player_action(uid, "fold")
+            # 朋友局统一规则：倒计时结束仍未操作，无论是否可以过牌都自动弃牌。
+            # 为保持本手底池数据完整，玩家在本手结算时再真正离座。
+            player.leave_after_hand = True
+            player.timed_out = True
+            await self.player_action(uid, "fold")
         except asyncio.CancelledError:
             pass
 
@@ -630,18 +775,21 @@ class GameEngine:
         players_data = []
         for uid, p in self.players.items():
             show_cards = False
-            if for_user_id == uid:
+            if for_user_id == uid and not self.dealing:
                 show_cards = True
-            elif self.phase in (GamePhase.SHOWDOWN, GamePhase.SETTLING) and len(p.hole_cards) > 0:
+            elif uid in self.revealed_user_ids and len(p.hole_cards) > 0:
                 show_cards = True
             players_data.append(p.to_dict(show_cards=show_cards))
 
         players_data.sort(key=lambda x: x["seat"])
 
         actions = []
-        if for_user_id and self.phase not in (GamePhase.WAITING, GamePhase.SHOWDOWN, GamePhase.SETTLING):
+        if (for_user_id and not self.dealing
+                and self.phase not in (GamePhase.WAITING, GamePhase.SHOWDOWN, GamePhase.SETTLING)):
             player = self.players.get(for_user_id)
-            if player and player.seat == self.current_player_seat and player.status == PlayerStatus.ACTIVE:
+            if (player and player.seat == self.current_player_seat
+                    and player.seat in self._players_to_act
+                    and player.status == PlayerStatus.ACTIVE):
                 call_amount = self.current_bet - player.current_bet
                 if call_amount <= 0:
                     actions.append({"action": "check", "label": "过牌"})
@@ -676,8 +824,19 @@ class GameEngine:
             "small_blind": self.small_blind,
             "big_blind": self.big_blind,
             "turn_timeout": self.turn_timeout,
+            "turn_id": self.turn_id,
+            "turn_remaining": (max(0, math.ceil(self.turn_deadline - time.time()))
+                               if self.turn_deadline else 0),
             "actions": actions,
             "last_hand_results": self.last_hand_results,
+            "last_hand_summary": self.last_hand_summary,
+            "pending_show_choice": for_user_id == self.pending_show_user_id,
+            "rebuy_amount": self.big_blind * 50,
+            "all_in_runout": self.all_in_runout,
+            "dealing": self.dealing,
+            "players_to_act_count": len(self._players_to_act),
+            "dealer_image": (f"/api/dealer-image?v={self.dealer_image_revision}"
+                             if self.dealer_image else ""),
             "seats_count": self.max_players,
         }
 

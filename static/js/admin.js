@@ -1,5 +1,6 @@
 const API = window.location.origin;
 let adminToken = localStorage.getItem('admin_token') || '';
+let dealerImageData = '';
 
 // 页面加载
 window.onload = function() {
@@ -168,6 +169,38 @@ async function loadTableConfig() {
     document.getElementById('cfg-big-blind').value = cfg.big_blind;
     document.getElementById('cfg-turn-timeout').value = cfg.turn_timeout;
     document.getElementById('cfg-max-players').value = cfg.max_players;
+    dealerImageData = cfg.dealer_image || '';
+    renderDealerPreview();
+}
+
+function loadDealerImage(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (file.size > 1_500_000) {
+        alert('荷官图片请控制在 1.5MB 以内');
+        event.target.value = '';
+        return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+        dealerImageData = reader.result;
+        renderDealerPreview();
+    };
+    reader.readAsDataURL(file);
+}
+
+function clearDealerImage() {
+    dealerImageData = '';
+    document.getElementById('cfg-dealer-image').value = '';
+    renderDealerPreview();
+}
+
+function renderDealerPreview() {
+    const preview = document.getElementById('cfg-dealer-preview');
+    const placeholder = document.getElementById('cfg-dealer-placeholder');
+    preview.src = dealerImageData;
+    preview.style.display = dealerImageData ? '' : 'none';
+    placeholder.style.display = dealerImageData ? 'none' : '';
 }
 
 async function saveTableConfig() {
@@ -177,6 +210,7 @@ async function saveTableConfig() {
         big_blind: parseInt(document.getElementById('cfg-big-blind').value),
         turn_timeout: parseInt(document.getElementById('cfg-turn-timeout').value),
         max_players: parseInt(document.getElementById('cfg-max-players').value),
+        dealer_image: dealerImageData,
     };
     const res = await apiFetch('/api/admin/table_config', {
         method: 'POST',
