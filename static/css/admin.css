@@ -77,3 +77,8 @@ td button.btn-del:hover { background: #c0392b; }
     background: #0f3460; padding: 12px; border-radius: 8px; margin-bottom: 10px;
     font-size: 13px; line-height: 1.6;
 }
+.dealer-preview-wrap { min-height: 86px; display: flex; align-items: center; justify-content: center;
+    margin: 5px 0 8px; border: 1px dashed #48536c; border-radius: 10px; background: #101b37; color: #8993a8; }
+.dealer-preview { width: 76px; height: 76px; object-fit: cover; border-radius: 50%; border: 2px solid #d6a443; }
+.form-section button.btn-secondary { background: #45536f; }
+.form-section button.btn-secondary:hover { background: #586985; }

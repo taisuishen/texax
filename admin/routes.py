@@ -12,6 +12,7 @@ from auth import (
 )
 import config
 import redis_client
+from avatar_config import DEFAULT_AVATAR_ID, is_valid_avatar
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -49,12 +50,14 @@ async def create_user(req: CreateUserRequest, _=Depends(require_admin)):
         if u["username"] == req.username:
             raise HTTPException(status_code=400, detail="用户名已存在")
 
+    avatar_id = req.avatar_id if is_valid_avatar(req.avatar_id) else DEFAULT_AVATAR_ID
     user_id = str(uuid.uuid4())[:8]
     user_data = {
         "user_id": user_id,
         "username": req.username,
         "password_hash": hash_password(req.password),
         "chips": req.chips,
+        "avatar_id": avatar_id,
         "created_at": str(__import__("datetime").datetime.now()),
     }
     await redis_client.save_user(user_id, user_data)
@@ -88,7 +91,20 @@ async def update_table_config(req: UpdateTableConfigRequest, _=Depends(require_a
         cfg["turn_timeout"] = req.turn_timeout
     if req.max_players is not None:
         cfg["max_players"] = req.max_players
+    if req.dealer_image is not None:
+        if len(req.dealer_image) > 2_100_000:
+            raise HTTPException(status_code=400, detail="荷官图片过大，请控制在 1.5MB 以内")
+        if req.dealer_image and not req.dealer_image.startswith("data:image/"):
+            raise HTTPException(status_code=400, detail="荷官文件必须是图片")
+        cfg["dealer_image"] = req.dealer_image
     await redis_client.save_table_config(cfg)
+    # 后台保存后立即同步当前牌桌，无需重启服务。
+    from ws.handler import manager
+    if manager.game_engine:
+        manager.game_engine.update_config(
+            cfg["small_blind"], cfg["big_blind"], cfg["turn_timeout"],
+            cfg["max_players"], cfg.get("dealer_image", ""),
+        )
     return {"ok": True, **cfg}
 
 
