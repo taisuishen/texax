@@ -33,7 +33,7 @@ let pendingReactionChoices = null;
 let reactionExpiresAt = 0;
 const activeSpeechBubbles = new Map();
 const speechBubbleTimers = new Map();
-let potAwardsTimer = null;
+let potAwardAnimationTimers = [];
 let decodedCheckBuffer = null;
 let checkDecodePromise = null;
 const mediaSounds = {
@@ -173,14 +173,13 @@ function handleGameState(state, userInfo) {
     if (state.event === 'hand_result' && state.last_hand_results && lastAnimatedHand !== state.hand_number) {
         lastAnimatedHand = state.hand_number;
         const results = state.last_hand_results;
-        setTimeout(() => animateHandResult(results), 900);
-        showPotAwards(state.pot_awards || []);
+        setTimeout(() => animateHandResult(results, state.pot_awards || []), 900);
         showReactionPicker(state.last_hand_results);
     }
     if (state.event === 'hand_start') {
         pendingReactionChoices = null;
         reactionExpiresAt = 0;
-        hidePotAwards();
+        clearPotAwardAnimation();
         simulateDealerDeal(state);
     }
     if (state.event === 'single_player_idle') {
@@ -773,26 +772,93 @@ function stopTurnTimer() {
     }
 }
 
-function animateHandResult(results) {
-    playMediaSound('win');
-    results.filter(r => r.won > 0).forEach((winner, index) => {
-        const player = gameState.players.find(p => p.user_id === winner.user_id);
-        const target = player ? document.getElementById(`seat-${player.seat}`) : null;
-        if (!target) return;
-        const table = document.querySelector('.poker-table').getBoundingClientRect();
-        const rect = target.getBoundingClientRect();
-        const chip = document.createElement('div');
-        chip.className = 'flying-chip';
-        chip.textContent = `+${winner.won}`;
-        chip.style.left = `${table.left + table.width / 2}px`;
-        chip.style.top = `${table.top + table.height / 2}px`;
-        chip.style.setProperty('--chip-x', `${rect.left + rect.width / 2 - table.left - table.width / 2}px`);
-        chip.style.setProperty('--chip-y', `${rect.top + rect.height / 2 - table.top - table.height / 2}px`);
-        document.getElementById('chip-animation-layer').appendChild(chip);
-        setTimeout(() => chip.remove(), 1500);
-        if (winner.user_id === userId) showWinBanner(
-            Math.max(0, winner.profit ?? winner.won), index * 100
-        );
+function animateHandResult(results, awards = []) {
+    clearPotAwardAnimation();
+    const layer = document.getElementById('chip-animation-layer');
+    const potDisplay = document.getElementById('pot-display');
+    if (!layer || !potDisplay) return;
+
+    const winningResults = results.filter(result => result.won > 0);
+    let orderedAwards = awards
+        .filter(pot => Number(pot.amount) > 0 && (pot.winners || []).length)
+        .slice()
+        .sort((left, right) => Number(left.pot_index || 0) - Number(right.pot_index || 0));
+
+    // Older/reconnecting clients may receive a result without detailed pot data.
+    if (!orderedAwards.length && winningResults.length) {
+        orderedAwards = [{
+            pot_index: 0,
+            label: '底池',
+            amount: winningResults.reduce((sum, winner) => sum + Number(winner.won || 0), 0),
+            winners: winningResults.map(winner => ({
+                user_id: winner.user_id,
+                username: winner.username,
+                amount: Number(winner.won || 0),
+            })),
+        }];
+    }
+    if (!orderedAwards.length) return;
+
+    const originRect = potDisplay.getBoundingClientRect();
+    const originX = originRect.left + originRect.width / 2;
+    const originY = originRect.top + originRect.height / 2;
+    const availableWidth = Math.max(180, Math.min(window.innerWidth - 54, 520));
+    const spacing = orderedAwards.length === 1
+        ? 0
+        : Math.min(96, availableWidth / Math.max(1, orderedAwards.length - 1));
+    const firstX = originX - spacing * (orderedAwards.length - 1) / 2;
+    const bannerShownFor = new Set();
+    let winSoundPlayed = false;
+
+    orderedAwards.forEach((pot, potOrder) => {
+        const sourceX = firstX + spacing * potOrder;
+        const sourceY = originY + (potOrder % 2 === 0 ? -8 : 12);
+        const stack = document.createElement('div');
+        stack.className = 'pot-split-stack';
+        stack.dataset.potIndex = String(pot.pot_index ?? potOrder);
+        stack.style.left = `${sourceX}px`;
+        stack.style.top = `${sourceY}px`;
+        stack.innerHTML = `<i class="pot-chip-icon"></i><span>${escapeHtml(pot.label || `边池 ${potOrder}`)}</span><strong>${Number(pot.amount).toLocaleString()}</strong>`;
+        layer.appendChild(stack);
+        requestAnimationFrame(() => stack.classList.add('visible'));
+
+        const awardDelay = 560 + potOrder * 900;
+        schedulePotAwardAnimation(() => {
+            if (!winSoundPlayed) {
+                winSoundPlayed = true;
+                playMediaSound('win');
+            }
+            stack.classList.add('awarding');
+            (pot.winners || []).forEach((winner, winnerIndex) => {
+                const player = gameState?.players.find(item => item.user_id === winner.user_id);
+                const target = player ? document.getElementById(`seat-${player.seat}`) : null;
+                if (!target) return;
+                const targetRect = target.getBoundingClientRect();
+                const targetX = targetRect.left + targetRect.width / 2;
+                const targetY = targetRect.top + targetRect.height / 2;
+                const flight = document.createElement('div');
+                flight.className = 'pot-award-flight';
+                flight.style.left = `${sourceX}px`;
+                flight.style.top = `${sourceY}px`;
+                flight.style.setProperty('--chip-x', `${targetX - sourceX}px`);
+                flight.style.setProperty('--chip-y', `${targetY - sourceY}px`);
+                flight.style.animationDelay = `${winnerIndex * 90}ms`;
+                flight.innerHTML = `<i class="pot-chip-icon"></i><strong>+${Number(winner.amount).toLocaleString()}</strong>`;
+                layer.appendChild(flight);
+                schedulePotAwardAnimation(() => flight.remove(), 1250 + winnerIndex * 90);
+                schedulePotAwardAnimation(() => {
+                    target.classList.add('pot-award-winner');
+                    schedulePotAwardAnimation(() => target.classList.remove('pot-award-winner'), 650);
+                }, 760 + winnerIndex * 90);
+
+                if (winner.user_id === userId && !bannerShownFor.has(winner.user_id)) {
+                    bannerShownFor.add(winner.user_id);
+                    const result = winningResults.find(item => item.user_id === winner.user_id);
+                    showWinBanner(Math.max(0, result?.profit ?? result?.won ?? winner.amount), winnerIndex * 90);
+                }
+            });
+            schedulePotAwardAnimation(() => stack.remove(), 1050);
+        }, awardDelay);
     });
 }
 
@@ -955,29 +1021,20 @@ function renderPlayerBubble(targetUserId) {
     speechBubbleTimers.set(targetUserId, timer);
 }
 
-function showPotAwards(awards) {
-    const panel = document.getElementById('pot-awards-banner');
-    if (!panel || !awards.length) return;
-    const rows = awards.map((pot, index) => {
-        const winners = (pot.winners || []).map(winner =>
-            `${escapeHtml(winner.username)} <strong>+${Number(winner.amount).toLocaleString()}</strong>`
-        ).join('、');
-        return `<div class="pot-award-row" style="animation-delay:${index * 0.28}s">
-            <span>${escapeHtml(pot.label)} · ${Number(pot.amount).toLocaleString()}</span>
-            <b>→</b><span>${winners}</span>
-        </div>`;
-    }).join('');
-    panel.innerHTML = `<div class="pot-awards-title">底池分配</div>${rows}`;
-    panel.style.display = '';
-    if (potAwardsTimer) clearTimeout(potAwardsTimer);
-    potAwardsTimer = setTimeout(hidePotAwards, Math.min(8500, 5500 + (awards.length - 1) * 1200));
+function schedulePotAwardAnimation(callback, delay) {
+    const timer = setTimeout(() => {
+        potAwardAnimationTimers = potAwardAnimationTimers.filter(item => item !== timer);
+        callback();
+    }, delay);
+    potAwardAnimationTimers.push(timer);
+    return timer;
 }
 
-function hidePotAwards() {
-    const panel = document.getElementById('pot-awards-banner');
-    if (panel) panel.style.display = 'none';
-    if (potAwardsTimer) clearTimeout(potAwardsTimer);
-    potAwardsTimer = null;
+function clearPotAwardAnimation() {
+    potAwardAnimationTimers.forEach(timer => clearTimeout(timer));
+    potAwardAnimationTimers = [];
+    document.querySelectorAll('.pot-split-stack, .pot-award-flight').forEach(element => element.remove());
+    document.querySelectorAll('.pot-award-winner').forEach(element => element.classList.remove('pot-award-winner'));
 }
 
 function showReactionPicker(results) {

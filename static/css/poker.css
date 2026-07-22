@@ -441,38 +441,47 @@ body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #1a1a
 
 /* 动画 */
 .chip-animation-layer { position: fixed; inset: 0; pointer-events: none; z-index: 240; }
-.flying-chip { position: fixed; min-width: 52px; padding: 7px 10px; border-radius: 20px;
-    background: radial-gradient(circle, #ffe36e, #e48c00); color: #281600; font-weight: 900;
-    text-align: center; box-shadow: 0 0 16px #f0a500; animation: chipFly 1.4s ease-in forwards; }
-@keyframes chipFly { from { transform: translate(-50%,-50%) scale(.7); opacity: 0; }
-    20% { opacity: 1; } to { transform: translate(calc(-50% + var(--chip-x)), calc(-50% + var(--chip-y))) scale(.55); opacity: 0; } }
+.pot-split-stack { position: fixed; display: grid; grid-template-columns: 26px auto; grid-template-rows: auto auto;
+    align-items: center; column-gap: 6px; min-width: 72px; padding: 5px 9px 5px 6px;
+    border: 1px solid rgba(255,205,62,.82); border-radius: 22px;
+    background: linear-gradient(145deg, rgba(29,40,66,.98), rgba(8,17,37,.98));
+    color: #fff; box-shadow: 0 5px 18px rgba(0,0,0,.5), 0 0 12px rgba(240,165,0,.2);
+    transform: translate(-50%,-50%) scale(.55); opacity: 0; transition: opacity .22s ease, transform .3s cubic-bezier(.2,.9,.25,1.25); }
+.pot-split-stack.visible { transform: translate(-50%,-50%) scale(1); opacity: 1; }
+.pot-split-stack.awarding { transform: translate(-50%,-50%) scale(.82); opacity: .28; }
+.pot-split-stack > .pot-chip-icon { grid-row: 1 / 3; }
+.pot-split-stack span { color: #ffd45f; font-size: 10px; line-height: 1; white-space: nowrap; }
+.pot-split-stack strong { font-size: 13px; line-height: 1.1; white-space: nowrap; }
+.pot-chip-icon { position: relative; display: inline-block; width: 24px; height: 24px; border-radius: 50%;
+    border: 3px dashed #ffe07a; background: radial-gradient(circle at 38% 34%, #ff806c 0 18%, #c72535 20% 56%, #6d101b 58% 100%);
+    box-shadow: 0 2px 5px rgba(0,0,0,.45), inset 0 0 0 2px rgba(255,255,255,.25); }
+.pot-chip-icon::after { content: ''; position: absolute; inset: 5px; border-radius: 50%;
+    background: #ffd34f; box-shadow: inset 0 0 0 2px #fff1a6; }
+.pot-award-flight { position: fixed; display: flex; align-items: center; gap: 5px; min-width: 58px;
+    padding: 5px 8px 5px 5px; border-radius: 22px; color: #291900;
+    background: linear-gradient(145deg, #fff0a4, #efa30b); box-shadow: 0 0 18px rgba(255,190,35,.9);
+    transform: translate(-50%,-50%) scale(.75); opacity: 0;
+    animation: potAwardFly 1.05s cubic-bezier(.28,.72,.24,1) forwards; }
+.pot-award-flight .pot-chip-icon { width: 21px; height: 21px; border-width: 2px; }
+.pot-award-flight .pot-chip-icon::after { inset: 4px; }
+.pot-award-flight strong { font-size: 13px; white-space: nowrap; }
+@keyframes potAwardFly {
+    0% { transform: translate(-50%,-50%) scale(.72); opacity: 0; }
+    14% { opacity: 1; }
+    72% { opacity: 1; }
+    100% { transform: translate(calc(-50% + var(--chip-x)), calc(-50% + var(--chip-y))) scale(.55) rotate(10deg); opacity: 0; }
+}
+.pot-award-winner { animation: potWinnerPulse .65s ease-out; }
+@keyframes potWinnerPulse {
+    0%,100% { filter: none; }
+    35% { filter: drop-shadow(0 0 13px #ffd34f) brightness(1.22); }
+}
 .win-banner { position: fixed; left: 50%; top: 42%; transform: translate(-50%,-50%); z-index: 260;
     font-size: clamp(42px, 9vw, 86px); font-weight: 1000; color: #ffd34d; text-shadow: 0 4px 20px #000;
     animation: winPop 1.8s ease-out; pointer-events: none; }
 .win-banner small { display: block; text-align: center; font-size: .38em; }
 @keyframes winPop { 0% { opacity:0; transform:translate(-50%,-50%) scale(.5) }
     20%,75% { opacity:1; transform:translate(-50%,-50%) scale(1) } 100% { opacity:0 } }
-.pot-awards-banner {
-    position: fixed; z-index: 255; left: 50%; top: 59%; transform: translate(-50%,-50%);
-    width: min(470px, calc(100vw - 28px)); padding: 14px;
-    border: 1px solid rgba(240,165,0,.72); border-radius: 14px;
-    background: rgba(10,22,50,.94); color: #fff;
-    box-shadow: 0 14px 42px rgba(0,0,0,.58), 0 0 18px rgba(240,165,0,.16);
-    pointer-events: none;
-}
-.pot-awards-title { margin-bottom: 8px; color: #f0a500; text-align: center; font-size: 15px; font-weight: 900; }
-.pot-award-row {
-    display: grid; grid-template-columns: minmax(90px,1fr) 18px minmax(120px,1.4fr);
-    align-items: center; gap: 5px; padding: 7px 9px; margin-top: 5px;
-    border-radius: 8px; background: rgba(255,255,255,.065); font-size: 13px;
-    opacity: 0; animation: potAwardIn .36s ease-out forwards;
-}
-.pot-award-row > b { color: #f0a500; text-align: center; }
-.pot-award-row strong { color: #ffd45f; }
-@keyframes potAwardIn {
-    from { opacity:0; transform:translateY(8px); }
-    to { opacity:1; transform:none; }
-}
 .choice-overlay { position: fixed; inset: 0; z-index: 300; background: rgba(0,0,0,.72);
     display: flex; align-items: center; justify-content: center; }
 .choice-card { width: min(430px, 92vw); padding: 28px; border-radius: 16px; background: #16213e;
@@ -605,9 +614,13 @@ body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #1a1a
     .showdown-content { padding: 16px; }
     .showdown-content h2 { font-size: 18px; }
     .result-item { padding: 8px; }
-    .pot-awards-banner { top: 55%; padding: 10px; }
-    .pot-awards-title { font-size: 13px; }
-    .pot-award-row { grid-template-columns: minmax(72px,1fr) 14px minmax(105px,1.4fr); padding: 6px; font-size: 11px; }
+    .pot-split-stack { grid-template-columns: 21px auto; min-width: 62px; column-gap: 4px; padding: 4px 7px 4px 5px; }
+    .pot-split-stack > .pot-chip-icon { width: 20px; height: 20px; border-width: 2px; }
+    .pot-split-stack > .pot-chip-icon::after { inset: 4px; }
+    .pot-split-stack span { font-size: 8px; }
+    .pot-split-stack strong { font-size: 11px; }
+    .pot-award-flight { min-width: 50px; padding: 4px 6px 4px 4px; }
+    .pot-award-flight strong { font-size: 11px; }
 
     /* 聊天 */
     .chat-panel {
