@@ -218,6 +218,43 @@ class FriendGameFeatureTests(unittest.IsolatedAsyncioTestCase):
         self.engine._players_to_act.discard(alice.seat)
         self.assertEqual(self.engine.get_state("a")["actions"], [])
 
+    async def test_only_call_or_fold_when_all_opponents_are_all_in(self):
+        alice = self.engine.get_player("a")
+        bob = self.engine.get_player("b")
+        alice.status = PlayerStatus.ACTIVE
+        bob.status = PlayerStatus.ALL_IN
+        alice.current_bet = 100
+        bob.current_bet = 500
+        self.engine.current_bet = 500
+        self.engine.phase = GamePhase.FLOP
+        self.engine.current_player_seat = alice.seat
+        self.engine._players_to_act = {alice.seat}
+
+        action_names = [row["action"] for row in self.engine.get_state("a")["actions"]]
+        self.assertEqual(action_names, ["call", "fold"])
+
+        result = await self.engine.player_action("a", "raise", 800)
+        self.assertFalse(result["ok"])
+        self.assertIn("只能跟注或弃牌", result["error"])
+
+    async def test_raise_remains_available_with_an_active_opponent_in_multiway_pot(self):
+        self.engine.sit_down("c", "Carol", 1000, 2)
+        alice = self.engine.get_player("a")
+        bob = self.engine.get_player("b")
+        carol = self.engine.get_player("c")
+        alice.status = PlayerStatus.ACTIVE
+        bob.status = PlayerStatus.ALL_IN
+        carol.status = PlayerStatus.ACTIVE
+        self.engine.current_bet = 200
+        alice.current_bet = 100
+        self.engine.phase = GamePhase.FLOP
+        self.engine.current_player_seat = alice.seat
+        self.engine._players_to_act = {alice.seat, carol.seat}
+
+        action_names = [row["action"] for row in self.engine.get_state("a")["actions"]]
+        self.assertIn("raise", action_names)
+        self.assertIn("allin", action_names)
+
     async def test_dealing_hides_real_cards_and_actions_until_animation_finishes(self):
         alice = self.engine.get_player("a")
         alice.status = PlayerStatus.ACTIVE

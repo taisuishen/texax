@@ -265,6 +265,15 @@ class GameEngine:
         """还能行动的座位 (仅ACTIVE, 排除 ALL_IN 和 FOLDED)"""
         return sorted(p.seat for p in self.players.values() if p.status == PlayerStatus.ACTIVE)
 
+    def _has_opponent_who_can_respond(self, user_id: str) -> bool:
+        """至少还有一名对手能回应加注时，才允许 Raise/主动 All-in。"""
+        return any(
+            p.user_id != user_id
+            and p.status == PlayerStatus.ACTIVE
+            and p.chips > 0
+            for p in self.players.values()
+        )
+
     def _next_seat(self, current_seat: int, seat_list: list[int]) -> int:
         """在座位列表中找 current_seat 之后的下一个座位 (环形)"""
         if not seat_list:
@@ -399,9 +408,12 @@ class GameEngine:
         if player.status != PlayerStatus.ACTIVE:
             return {"ok": False, "error": "你无法行动"}
 
+        call_amount = self.current_bet - player.current_bet
+        if action in ("raise", "allin") and not self._has_opponent_who_can_respond(user_id):
+            return {"ok": False, "error": "其他玩家均已全押，只能跟注或弃牌"}
+
         self._cancel_turn_timer()
 
-        call_amount = self.current_bet - player.current_bet
         did_raise = False
 
         if action == "fold":
@@ -892,21 +904,23 @@ class GameEngine:
                 if call_amount <= 0:
                     actions.append({"action": "check", "label": "过牌"})
                 else:
-                    actions.append({"action": "call", "label": f"跟注 {call_amount}", "amount": call_amount})
+                    actual_call = min(call_amount, player.chips)
+                    actions.append({"action": "call", "label": f"跟注 {actual_call}", "amount": actual_call})
                 actions.append({"action": "fold", "label": "弃牌"})
-                min_raise_to = self.current_bet + self.min_raise
-                if player.chips + player.current_bet > self.current_bet:
+                if self._has_opponent_who_can_respond(for_user_id):
+                    min_raise_to = self.current_bet + self.min_raise
+                    if player.chips + player.current_bet > self.current_bet:
+                        actions.append({
+                            "action": "raise",
+                            "label": "加注",
+                            "min": min_raise_to,
+                            "max": player.chips + player.current_bet,
+                        })
                     actions.append({
-                        "action": "raise",
-                        "label": "加注",
-                        "min": min_raise_to,
-                        "max": player.chips + player.current_bet,
+                        "action": "allin",
+                        "label": f"全押 {player.chips}",
+                        "amount": player.chips,
                     })
-                actions.append({
-                    "action": "allin",
-                    "label": f"全押 {player.chips}",
-                    "amount": player.chips,
-                })
 
         return {
             "phase": self.phase.value,

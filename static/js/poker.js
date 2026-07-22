@@ -18,6 +18,7 @@ let turnTimerEnd = 0;
 let currentTimerSeat = -1;
 let currentTurnId = 0;
 let notifiedTurnId = 0;
+let raisePanelTurnKey = '';
 const warnedTurnIds = new Set();
 let reconnectTimer = null;
 const normalDocumentTitle = document.title;
@@ -437,6 +438,7 @@ function renderActions(state) {
     const standBtn = document.getElementById('btn-standup');
 
     if (!myP) {
+        closeRaisePanel();
         actionBar.style.display = 'none';
         seatActions.style.display = 'none';
         return;
@@ -446,6 +448,7 @@ function renderActions(state) {
     standBtn.style.display = '';
 
     if (state.phase === 'settling') {
+        closeRaisePanel();
         actionBar.style.display = 'none';
         if (state.players.length === 1) {
             seatActions.style.display = '';
@@ -463,6 +466,7 @@ function renderActions(state) {
     }
 
     if (state.phase === 'waiting') {
+        closeRaisePanel();
         actionBar.style.display = 'none';
         seatActions.style.display = '';
         readyBtn.textContent = myP.is_ready ? '取消准备' : '准备';
@@ -476,9 +480,12 @@ function renderActions(state) {
         actionBar.style.display = '';
         const btnsEl = document.getElementById('action-buttons');
         const raiseEl = document.getElementById('raise-slider');
+        const turnKey = `${state.hand_number || 0}:${state.turn_id || 0}:${state.current_player_seat}`;
+        const raiseAction = state.actions.find(action => action.action === 'raise');
+        const keepRaiseOpen = raiseEl.style.display !== 'none'
+            && raisePanelTurnKey === turnKey && Boolean(raiseAction);
         btnsEl.innerHTML = '';
-        raiseEl.style.display = 'none';
-        document.body.classList.remove('raise-panel-open');
+        if (!keepRaiseOpen) closeRaisePanel();
 
         state.actions.forEach(a => {
             const btn = document.createElement('button');
@@ -498,9 +505,14 @@ function renderActions(state) {
                 btn.className += ' btn-raise';
                 btn.onclick = () => {
                     const opening = raiseEl.style.display === 'none';
-                    raiseEl.style.display = opening ? 'flex' : 'none';
-                    document.body.classList.toggle('raise-panel-open', opening);
-                    configureRaiseControls(a, state, myP);
+                    if (opening) {
+                        raisePanelTurnKey = turnKey;
+                        raiseEl.style.display = 'flex';
+                        document.body.classList.add('raise-panel-open');
+                        configureRaiseControls(a, state, myP);
+                    } else {
+                        closeRaisePanel();
+                    }
                 };
             } else if (a.action === 'allin') {
                 btn.className += ' btn-allin';
@@ -510,6 +522,7 @@ function renderActions(state) {
             btnsEl.appendChild(btn);
         });
     } else {
+        closeRaisePanel();
         actionBar.style.display = 'none';
     }
 }
@@ -549,6 +562,7 @@ function adjustRaiseBy(direction) {
 function closeRaisePanel() {
     document.getElementById('raise-slider').style.display = 'none';
     document.body.classList.remove('raise-panel-open');
+    raisePanelTurnKey = '';
 }
 
 function configureRaiseControls(action, state, myPlayer) {
