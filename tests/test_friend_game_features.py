@@ -101,6 +101,15 @@ class FriendGameFeatureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results["b"]["won"], 600)
         self.assertEqual(results["a"]["returned"], 400)
         self.assertEqual(sum(player.chips for player in (alice, bob, carol)), 1900)
+        self.assertEqual(
+            self.engine.last_pot_awards,
+            [
+                {"pot_index": 0, "label": "主池", "amount": 900,
+                 "winners": [{"user_id": "c", "username": "Carol", "amount": 900}]},
+                {"pot_index": 1, "label": "边池 1", "amount": 600,
+                 "winners": [{"user_id": "b", "username": "Bob", "amount": 600}]},
+            ],
+        )
 
     async def test_rebuy_updates_friend_game_ledger(self):
         alice = self.engine.get_player("a")
@@ -206,6 +215,21 @@ class FriendGameFeatureTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.engine._reveal_all_in_players())
         self.assertIn("hole_cards", self.engine.get_state("a")["players"][1])
         self.assertIn("hole_cards", self.engine.get_state("b")["players"][0])
+
+    async def test_cards_reveal_when_only_one_live_player_still_has_chips(self):
+        alice = self.engine.get_player("a")
+        bob = self.engine.get_player("b")
+        alice.status = PlayerStatus.ACTIVE
+        alice.chips = 700
+        bob.status = PlayerStatus.ALL_IN
+        bob.chips = 0
+        alice.hole_cards = [Card("A", "♣"), Card("K", "♠")]
+        bob.hole_cards = [Card("Q", "♥"), Card("Q", "♦")]
+
+        self.assertTrue(self.engine._reveal_all_in_players())
+        spectator_state = self.engine.get_state("spectator")
+        self.assertTrue(all("hole_cards" in row for row in spectator_state["players"]))
+        self.assertFalse(self.engine._reveal_all_in_players())  # 不重复广播亮牌事件
 
     async def test_completed_action_immediately_hides_action_buttons(self):
         alice = self.engine.get_player("a")

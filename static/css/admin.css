@@ -85,3 +85,7 @@ td button.btn-edit:hover { background: #2980b9; }
 .dealer-preview { width: 76px; height: 76px; object-fit: cover; border-radius: 50%; border: 2px solid #d6a443; }
 .form-section button.btn-secondary { background: #45536f; }
 .form-section button.btn-secondary:hover { background: #586985; }
+.danger-zone { padding: 14px; border: 1px solid rgba(231,76,60,.55); border-radius: 10px; background: rgba(231,76,60,.07); }
+.danger-zone .danger-hint { margin-bottom: 10px; color: #c8a5a5; font-size: 12px; line-height: 1.5; }
+.form-section button.btn-danger { background: #c0392b; }
+.form-section button.btn-danger:hover { background: #e74c3c; }

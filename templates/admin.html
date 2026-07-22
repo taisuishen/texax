@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>德州扑克 - 后台管理</title>
-    <link rel="stylesheet" href="/static/css/admin.css?v=20260722-chip-edit1">
+    <link rel="stylesheet" href="/static/css/admin.css?v=20260722-reset-finances1">
 </head>
 <body>
     <!-- 登录 -->
@@ -43,6 +43,13 @@
                     <input type="number" id="recharge-amount" placeholder="充值金额" value="1000">
                     <button onclick="addChips()">充值</button>
                     <p id="recharge-msg" class="msg-text"></p>
+                </div>
+                <div class="form-section danger-zone">
+                    <h3>重置全部账目</h3>
+                    <p class="danger-hint">将所有注册用户设为相同筹码，并清零朋友局借钱次数与借入总额。只能在等待阶段执行。</p>
+                    <input type="number" id="reset-all-chips" min="0" value="1000" placeholder="统一筹码">
+                    <button class="btn-danger" onclick="resetAllFinances()">重置所有人的筹码和借钱记录</button>
+                    <p id="reset-all-msg" class="msg-text"></p>
                 </div>
                 <div class="form-section">
                     <h3>用户列表</h3>
@@ -93,6 +100,6 @@
         </div>
     </div>
 
-    <script src="/static/js/admin.js?v=20260722-chip-edit1"></script>
+    <script src="/static/js/admin.js?v=20260722-reset-finances1"></script>
 </body>
 </html>

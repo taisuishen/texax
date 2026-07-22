@@ -186,6 +186,15 @@ class ConnectionManager:
                              if r.get("returned") and r not in winners]
             if other_refunds:
                 summary += "；" + "；".join(other_refunds)
+            if eng.last_pot_awards:
+                pot_parts = []
+                for pot in eng.last_pot_awards:
+                    recipients = "、".join(
+                        f"{winner['username']} +{winner['amount']}"
+                        for winner in pot.get("winners", [])
+                    )
+                    pot_parts.append(f"{pot['label']} {pot['amount']} → {recipients}")
+                summary += "；底池分配：" + "；".join(pot_parts)
             eng.last_hand_summary = f"第 {eng.hand_number} 手：{summary}"
             await self.publish_message({"kind": "system", "event": "hand_result",
                                         "hand_number": eng.hand_number,

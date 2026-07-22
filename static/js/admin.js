@@ -176,6 +176,36 @@ async function loadTableConfig() {
     renderDealerPreview();
 }
 
+async function resetAllFinances() {
+    const chips = Number(document.getElementById('reset-all-chips').value);
+    const msgEl = document.getElementById('reset-all-msg');
+    msgEl.textContent = '';
+    msgEl.className = 'msg-text';
+    if (!Number.isInteger(chips) || chips < 0) {
+        msgEl.textContent = '请输入大于或等于 0 的整数筹码';
+        msgEl.className = 'msg-text error';
+        return;
+    }
+    const confirmed = confirm(
+        `确定把所有用户筹码重置为 ${chips}，并清零所有借钱次数和借入总额吗？\n\n此操作不可撤销。`
+    );
+    if (!confirmed) return;
+
+    const res = await apiFetch('/api/admin/users/reset_all_finances', {
+        method: 'POST',
+        body: JSON.stringify({ chips })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+        msgEl.textContent = data.detail || '重置失败';
+        msgEl.className = 'msg-text error';
+        return;
+    }
+    msgEl.textContent = `已重置 ${data.users_reset} 名用户，每人 ${data.chips} 筹码`;
+    msgEl.className = 'msg-text success';
+    await loadUsers();
+}
+
 async function setUserChips(userId, currentChips) {
     const raw = prompt('请输入修改后的筹码总额：', String(currentChips));
     if (raw === null) return;

@@ -26,6 +26,10 @@ class SetChipsRequest(BaseModel):
     chips: int = Field(ge=0)
 
 
+class ResetAllFinancesRequest(BaseModel):
+    chips: int = Field(default=1000, ge=0)
+
+
 class UpdateTableConfigRequest(BaseModel):
     small_blind: int | None = None
     big_blind: int | None = None

@@ -31,6 +31,9 @@ let seenActions = new Map();
 let dealingTimers = [];
 let pendingReactionChoices = null;
 let reactionExpiresAt = 0;
+const activeSpeechBubbles = new Map();
+const speechBubbleTimers = new Map();
+let potAwardsTimer = null;
 let decodedCheckBuffer = null;
 let checkDecodePromise = null;
 const mediaSounds = {
@@ -171,11 +174,13 @@ function handleGameState(state, userInfo) {
         lastAnimatedHand = state.hand_number;
         const results = state.last_hand_results;
         setTimeout(() => animateHandResult(results), 900);
+        showPotAwards(state.pot_awards || []);
         showReactionPicker(state.last_hand_results);
     }
     if (state.event === 'hand_start') {
         pendingReactionChoices = null;
         reactionExpiresAt = 0;
+        hidePotAwards();
         simulateDealerDeal(state);
     }
     if (state.event === 'single_player_idle') {
@@ -358,6 +363,7 @@ function renderTable(state) {
         `;
     }
 
+    restoreSpeechBubbles();
     restoreReactionPicker();
 
     renderCommunityBoard(state);
@@ -404,9 +410,15 @@ function makeCardHtml(card, isSmall) {
     const sizeClass = isSmall ? 'card-small' : '';
     const isRed = card.suit === '♥' || card.suit === '♦';
     const colorClass = isRed ? 'red' : 'black';
-    return `<div class="card ${sizeClass} ${colorClass}">
-        <span class="card-rank">${card.rank}</span>
-        <span class="card-suit">${card.suit}</span>
+    const knownSuits = new Set(['spades', 'hearts', 'diamonds', 'clubs']);
+    const suitFallback = {'♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs'};
+    const suitName = knownSuits.has(card.suit_name) ? card.suit_name : (suitFallback[card.suit] || 'spades');
+    return `<div class="card ${sizeClass} ${colorClass} suit-${suitName}">
+        <span class="card-corner">
+            <span class="card-rank">${card.rank}</span>
+            <span class="card-suit">${card.suit}</span>
+        </span>
+        <span class="card-suit-large" aria-hidden="true">${card.suit}</span>
     </div>`;
 }
 
@@ -899,22 +911,73 @@ function addTableMessage(data, showBubble = true) {
 }
 
 function showPlayerBubble(targetUserId, text, extraClass = '') {
+    const expiresAt = Date.now() + 8000;
+    activeSpeechBubbles.set(targetUserId, {text, extraClass, expiresAt});
+    renderPlayerBubble(targetUserId);
+}
+
+function restoreSpeechBubbles() {
+    for (const targetUserId of activeSpeechBubbles.keys()) {
+        renderPlayerBubble(targetUserId);
+    }
+}
+
+function renderPlayerBubble(targetUserId) {
     if (!gameState) return;
+    const bubbleState = activeSpeechBubbles.get(targetUserId);
+    if (!bubbleState) return;
+    const remaining = bubbleState.expiresAt - Date.now();
+    if (remaining <= 0) {
+        activeSpeechBubbles.delete(targetUserId);
+        return;
+    }
     const player = gameState.players.find(p => p.user_id === targetUserId);
     if (!player) return;
     const seat = document.getElementById(`seat-${player.seat}`);
     if (!seat) return;
+    const previousTimer = speechBubbleTimers.get(targetUserId);
+    if (previousTimer) clearTimeout(previousTimer);
     const old = seat.querySelector('.speech-bubble');
     if (old) old.remove();
     const bubble = document.createElement('div');
-    bubble.className = `speech-bubble ${extraClass}`;
-    bubble.textContent = text;
+    bubble.className = `speech-bubble ${bubbleState.extraClass}`;
+    bubble.textContent = bubbleState.text;
     seat.appendChild(bubble);
     requestAnimationFrame(() => bubble.classList.add('visible'));
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+        const current = activeSpeechBubbles.get(targetUserId);
+        if (!current || current.expiresAt !== bubbleState.expiresAt) return;
+        activeSpeechBubbles.delete(targetUserId);
+        speechBubbleTimers.delete(targetUserId);
         bubble.classList.remove('visible');
         setTimeout(() => bubble.remove(), 220);
-    }, 6000);
+    }, remaining);
+    speechBubbleTimers.set(targetUserId, timer);
+}
+
+function showPotAwards(awards) {
+    const panel = document.getElementById('pot-awards-banner');
+    if (!panel || !awards.length) return;
+    const rows = awards.map((pot, index) => {
+        const winners = (pot.winners || []).map(winner =>
+            `${escapeHtml(winner.username)} <strong>+${Number(winner.amount).toLocaleString()}</strong>`
+        ).join('、');
+        return `<div class="pot-award-row" style="animation-delay:${index * 0.28}s">
+            <span>${escapeHtml(pot.label)} · ${Number(pot.amount).toLocaleString()}</span>
+            <b>→</b><span>${winners}</span>
+        </div>`;
+    }).join('');
+    panel.innerHTML = `<div class="pot-awards-title">底池分配</div>${rows}`;
+    panel.style.display = '';
+    if (potAwardsTimer) clearTimeout(potAwardsTimer);
+    potAwardsTimer = setTimeout(hidePotAwards, Math.min(8500, 5500 + (awards.length - 1) * 1200));
+}
+
+function hidePotAwards() {
+    const panel = document.getElementById('pot-awards-banner');
+    if (panel) panel.style.display = 'none';
+    if (potAwardsTimer) clearTimeout(potAwardsTimer);
+    potAwardsTimer = null;
 }
 
 function showReactionPicker(results) {

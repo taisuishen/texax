@@ -2,9 +2,11 @@
 后台管理 API
 """
 import uuid
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, Header
 from models import (
     AdminLoginRequest, CreateUserRequest, AddChipsRequest, SetChipsRequest,
+    ResetAllFinancesRequest,
     UpdateTableConfigRequest, TokenResponse,
 )
 from auth import (
@@ -99,6 +101,41 @@ async def set_chips(req: SetChipsRequest, _=Depends(require_admin)):
         await manager.broadcast_game_state("admin_chips_updated")
 
     return {"ok": True, "user_id": req.user_id, "chips": req.chips}
+
+
+@router.post("/users/reset_all_finances")
+async def reset_all_finances(req: ResetAllFinancesRequest, _=Depends(require_admin)):
+    from ws.handler import manager
+    engine = manager.game_engine
+    if engine and engine.phase.value != "waiting":
+        raise HTTPException(status_code=409, detail="牌局进行中，请等待本手结束并回到等待阶段")
+
+    users = await redis_client.get_all_users()
+    for user in users:
+        user["chips"] = req.chips
+        await redis_client.save_user(user["user_id"], user)
+
+    # 重新建立朋友局账本基线，清空所有历史借入次数和借入总额。
+    manager.session = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "status": "active",
+        "players": {},
+    }
+    if engine:
+        for player in engine.players.values():
+            player.chips = req.chips
+            player.initial_buyin = req.chips
+            player.rebuy_count = 0
+            player.rebuy_total = 0
+            player.pending_rebuy = req.chips <= 0
+            player.is_ready = False
+            await manager._save_session_player(player)
+    await redis_client.save_session(manager.session)
+
+    if engine:
+        await manager.broadcast_game_state("admin_all_finances_reset")
+
+    return {"ok": True, "users_reset": len(users), "chips": req.chips}
 
 
 @router.get("/table_config")
