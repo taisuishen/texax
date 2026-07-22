@@ -4,7 +4,7 @@
 import uuid
 from fastapi import APIRouter, HTTPException, Depends, Header
 from models import (
-    AdminLoginRequest, CreateUserRequest, AddChipsRequest,
+    AdminLoginRequest, CreateUserRequest, AddChipsRequest, SetChipsRequest,
     UpdateTableConfigRequest, TokenResponse,
 )
 from auth import (
@@ -72,6 +72,33 @@ async def add_chips(req: AddChipsRequest, _=Depends(require_admin)):
     user["chips"] = user.get("chips", 0) + req.amount
     await redis_client.save_user(req.user_id, user)
     return {"ok": True, "user_id": req.user_id, "chips": user["chips"]}
+
+
+@router.post("/users/set_chips")
+async def set_chips(req: SetChipsRequest, _=Depends(require_admin)):
+    user = await redis_client.get_user(req.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    # 牌局进行中直接改筹码会破坏下注与边池守恒，只允许在等待阶段修改。
+    from ws.handler import manager
+    engine = manager.game_engine
+    seated = engine.get_player(req.user_id) if engine else None
+    if seated and engine.phase.value != "waiting":
+        raise HTTPException(status_code=409, detail="该玩家正在牌局中，请本手结束后再修改")
+
+    user["chips"] = req.chips
+    await redis_client.save_user(req.user_id, user)
+
+    if seated:
+        seated.chips = req.chips
+        seated.pending_rebuy = req.chips <= 0
+        if seated.pending_rebuy:
+            seated.is_ready = False
+        await manager._save_session_player(seated)
+        await manager.broadcast_game_state("admin_chips_updated")
+
+    return {"ok": True, "user_id": req.user_id, "chips": req.chips}
 
 
 @router.get("/table_config")

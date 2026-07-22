@@ -85,7 +85,10 @@ async function loadUsers() {
             <td>${u.user_id}</td>
             <td>${u.username}</td>
             <td style="color:#f0a500;font-weight:bold">${u.chips}</td>
-            <td><button class="btn-del" onclick="deleteUser('${u.user_id}')">删除</button></td>
+            <td class="user-actions">
+                <button class="btn-edit" onclick="setUserChips('${u.user_id}', ${Number(u.chips) || 0})">修改筹码</button>
+                <button class="btn-del" onclick="deleteUser('${u.user_id}')">删除</button>
+            </td>
         `;
         tbody.appendChild(tr);
 
@@ -171,6 +174,27 @@ async function loadTableConfig() {
     document.getElementById('cfg-max-players').value = cfg.max_players;
     dealerImageData = cfg.dealer_image || '';
     renderDealerPreview();
+}
+
+async function setUserChips(userId, currentChips) {
+    const raw = prompt('请输入修改后的筹码总额：', String(currentChips));
+    if (raw === null) return;
+    const chips = Number(raw);
+    if (!Number.isInteger(chips) || chips < 0) {
+        alert('请输入大于或等于 0 的整数');
+        return;
+    }
+
+    const res = await apiFetch('/api/admin/users/set_chips', {
+        method: 'POST',
+        body: JSON.stringify({ user_id: userId, chips })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+        alert(data.detail || '修改失败');
+        return;
+    }
+    await loadUsers();
 }
 
 function loadDealerImage(event) {

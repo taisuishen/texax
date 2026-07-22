@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
     <title>德州扑克</title>
-    <link rel="stylesheet" href="/static/css/poker.css?v=20260721-mobile9">
+    <link rel="stylesheet" href="/static/css/poker.css?v=20260722-chat-sheet1">
 </head>
 <body>
     <!-- 登录界面 -->
@@ -90,10 +90,27 @@
         <!-- 操作按钮 -->
         <div id="action-bar" class="action-bar" style="display:none">
             <div id="action-buttons" class="action-buttons"></div>
-            <div id="raise-slider" class="raise-slider" style="display:none">
-                <input type="range" id="raise-range" min="0" max="1000" value="0">
-                <input type="number" id="raise-input" min="0" max="1000" value="0">
-                <button class="btn-action btn-raise" onclick="doRaise()">确认加注</button>
+            <div id="raise-slider" class="raise-panel" style="display:none">
+                <div class="raise-panel-header">
+                    <span>加注到</span>
+                    <button type="button" class="raise-close" onclick="closeRaisePanel()" aria-label="关闭">×</button>
+                </div>
+                <div id="raise-amount-display" class="raise-amount-display">0</div>
+                <div class="raise-panel-controls">
+                    <div id="raise-presets" class="raise-presets"></div>
+                    <div class="raise-range-wrap">
+                        <input type="range" id="raise-range" min="0" max="1000" value="0" aria-label="加注金额">
+                    </div>
+                </div>
+                <div class="raise-stepper">
+                    <button type="button" onclick="adjustRaiseBy(-1)">−</button>
+                    <span>按大盲调整</span>
+                    <button type="button" onclick="adjustRaiseBy(1)">＋</button>
+                </div>
+                <label class="raise-exact-label">精确金额
+                    <input type="number" id="raise-input" min="0" max="1000" value="0" inputmode="numeric">
+                </label>
+                <button class="btn-action btn-raise raise-confirm" onclick="doRaise()">确认加注</button>
             </div>
         </div>
 
@@ -165,6 +182,6 @@
         </div>
     </div>
 
-    <script src="/static/js/poker.js?v=20260721-mobile8"></script>
+    <script src="/static/js/poker.js?v=20260722-raise-panel1"></script>
 </body>
 </html>

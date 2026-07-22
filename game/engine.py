@@ -144,6 +144,8 @@ class GameEngine:
         self.all_in_runout = False
         self.dealing = False
         self._next_hand_task: asyncio.Task | None = None
+        self.single_player_idle_timeout = 180
+        self._single_player_idle_task: asyncio.Task | None = None
 
     def update_config(self, small_blind: int, big_blind: int, turn_timeout: int,
                       max_players: int, dealer_image: str = ""):
@@ -167,22 +169,80 @@ class GameEngine:
         player = Player(user_id=user_id, username=username, seat=seat, chips=chips,
                         avatar_id=avatar_id,
                         initial_buyin=chips)
+        # 允许余额为 0 的玩家先落座，再通过朋友局借钱买入继续游戏。
+        # pending_rebuy 会阻止其准备和进入下一手，直到完成买入。
+        if chips <= 0:
+            player.pending_rebuy = True
+            player.is_ready = False
         self.players[user_id] = player
         self.seats[seat] = user_id
+        if self.phase == GamePhase.WAITING and len(self.players) == 1:
+            self._schedule_single_player_idle()
+        elif len(self.players) >= 2:
+            self._cancel_single_player_idle()
         return True
 
     def stand_up(self, user_id: str) -> bool:
         if user_id not in self.players:
             return False
         player = self.players[user_id]
-        if self.phase == GamePhase.WAITING and player.is_ready:
+        # 只剩自己时不可能开局，不应再用“已准备”锁住离座操作。
+        if self.phase == GamePhase.WAITING and player.is_ready and len(self.players) > 1:
             return False
         if self.phase != GamePhase.WAITING:
             if player.status in (PlayerStatus.ACTIVE, PlayerStatus.ALL_IN):
                 return False
         del self.seats[player.seat]
         del self.players[user_id]
+        if self.phase == GamePhase.WAITING and len(self.players) == 1:
+            self._schedule_single_player_idle()
+        elif len(self.players) != 1:
+            self._cancel_single_player_idle()
         return True
+
+    def touch_single_player_activity(self, user_id: str):
+        """单人等待时，玩家的主动操作会重新开始空桌计时。"""
+        if (self.phase == GamePhase.WAITING and len(self.players) == 1
+                and user_id in self.players):
+            self._schedule_single_player_idle()
+
+    def _schedule_single_player_idle(self):
+        self._cancel_single_player_idle()
+        if self.single_player_idle_timeout < 0:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._single_player_idle_task = loop.create_task(
+            self._single_player_idle_handler()
+        )
+
+    def _cancel_single_player_idle(self):
+        task = self._single_player_idle_task
+        self._single_player_idle_task = None
+        try:
+            current_task = asyncio.current_task()
+        except RuntimeError:
+            current_task = None
+        if task and task is not current_task and not task.done():
+            task.cancel()
+
+    async def _single_player_idle_handler(self):
+        try:
+            await asyncio.sleep(self.single_player_idle_timeout)
+            if self.phase != GamePhase.WAITING or len(self.players) != 1:
+                return
+            user_id, player = next(iter(self.players.items()))
+            if self._save_chips:
+                await self._save_chips(user_id, player.chips)
+            self.stand_up(user_id)
+            await self._reset_for_next_hand("single_player_idle")
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if self._single_player_idle_task is asyncio.current_task():
+                self._single_player_idle_task = None
 
     def request_leave_after_hand(self, user_id: str) -> bool:
         player = self.players.get(user_id)
@@ -714,26 +774,64 @@ class GameEngine:
     async def _auto_start_next_hand(self):
         try:
             await asyncio.sleep(3)
-            await self.try_start_game()
+            started = await self.try_start_game()
+            if not started:
+                await self.reset_if_insufficient_players()
         except asyncio.CancelledError:
             pass
+        finally:
+            if self._next_hand_task is asyncio.current_task():
+                self._next_hand_task = None
 
-    async def _reset_for_next_hand(self):
+    async def reset_if_insufficient_players(self) -> bool:
+        """人数不足两人时结束残留牌局，并让剩余玩家可以重新选择或离座。"""
+        if len(self.players) >= 2:
+            return False
+        if self.phase not in (GamePhase.WAITING, GamePhase.SETTLING):
+            return False
+
+        current_task = asyncio.current_task()
+        if (self._next_hand_task and self._next_hand_task is not current_task
+                and not self._next_hand_task.done()):
+            self._next_hand_task.cancel()
+        self._next_hand_task = None
+
+        for player in self.players.values():
+            player.is_ready = False
+
+        await self._reset_for_next_hand("waiting_for_players")
+        if len(self.players) == 1:
+            self._schedule_single_player_idle()
+        else:
+            self._cancel_single_player_idle()
+        return True
+
+    async def _reset_for_next_hand(self, event: str = "round_end"):
         """所有人准备后调用: 清空牌桌, 开始新一局"""
+        self._cancel_turn_timer()
         self.phase = GamePhase.WAITING
         self.community_cards = []
+        self.pots = []
         self.current_bet = 0
         self.main_pot = 0
         self.current_player_seat = -1
+        self.small_blind_seat = -1
+        self.big_blind_seat = -1
         self.last_hand_results = None
+        self.pending_show_user_id = None
+        self.revealed_user_ids.clear()
+        self.all_in_runout = False
+        self.dealing = False
+        self._players_to_act.clear()
 
         for p in self.players.values():
             p.hole_cards = []
             p.current_bet = 0
             p.total_bet = 0
             p.last_action = ""
+            p.status = PlayerStatus.SITTING
 
-        await self._broadcast_state("round_end")
+        await self._broadcast_state(event)
 
     # ─── 计时器 ───
 

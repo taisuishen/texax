@@ -14,7 +14,7 @@ class FriendGameFeatureTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         tasks = [self.engine._show_choice_task, self.engine._next_hand_task,
-                 self.engine._turn_timer_task]
+                 self.engine._turn_timer_task, self.engine._single_player_idle_task]
         for task in tasks:
             if task and not task.done():
                 task.cancel()
@@ -115,6 +115,20 @@ class FriendGameFeatureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(alice.rebuy_total, 1000)
         self.assertEqual(self.engine.get_settlement()[0]["net"], -1000)
 
+    async def test_zero_chip_player_can_sit_then_borrow_buyin(self):
+        self.engine.stand_up("a")
+        self.assertTrue(self.engine.sit_down("a", "Alice", 0, 0))
+        alice = self.engine.get_player("a")
+        self.assertTrue(alice.pending_rebuy)
+        self.assertFalse(alice.is_ready)
+
+        result = await self.engine.rebuy("a", 1000)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(alice.chips, 1000)
+        self.assertFalse(alice.pending_rebuy)
+        self.assertEqual(alice.rebuy_count, 1)
+
     async def test_players_stay_ready_and_can_leave_after_hand(self):
         alice = self.engine.get_player("a")
         bob = self.engine.get_player("b")
@@ -126,6 +140,45 @@ class FriendGameFeatureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(self.engine.get_player("a"))
         self.assertTrue(bob.is_ready)
+
+    async def test_single_remaining_player_returns_to_waiting_and_can_leave(self):
+        alice = self.engine.get_player("a")
+        bob = self.engine.get_player("b")
+        alice.leave_after_hand = True
+        alice.status = PlayerStatus.ACTIVE
+        bob.status = PlayerStatus.ACTIVE
+        alice.hole_cards = [Card("A", "♠"), Card("K", "♠")]
+        bob.hole_cards = [Card("Q", "♥"), Card("J", "♥")]
+        self.engine.community_cards = [Card("2", "♣"), Card("3", "♦"), Card("4", "♠")]
+        self.engine.main_pot = 200
+
+        await self.engine._enter_settling()
+        self.assertEqual(self.engine.phase, GamePhase.SETTLING)
+        self.assertTrue(bob.is_ready)
+
+        self.assertTrue(await self.engine.reset_if_insufficient_players())
+        self.assertEqual(self.engine.phase, GamePhase.WAITING)
+        self.assertEqual(self.engine.community_cards, [])
+        self.assertEqual(self.engine.main_pot, 0)
+        self.assertEqual(bob.hole_cards, [])
+        self.assertFalse(bob.is_ready)
+        self.assertTrue(self.engine.stand_up("b"))
+        self.assertEqual(self.engine.players, {})
+
+    async def test_single_player_idle_activity_resets_timer_then_auto_leaves(self):
+        self.engine.single_player_idle_timeout = 0.05
+        self.assertTrue(self.engine.stand_up("a"))
+
+        await asyncio.sleep(0.03)
+        self.engine.touch_single_player_activity("b")
+        await asyncio.sleep(0.03)
+        self.assertIsNotNone(self.engine.get_player("b"))
+
+        await asyncio.sleep(0.04)
+        self.assertIsNone(self.engine.get_player("b"))
+        self.assertEqual(self.engine.phase, GamePhase.WAITING)
+        self.assertEqual(self.engine.community_cards, [])
+        self.assertEqual(self.engine.main_pot, 0)
 
     async def test_all_seated_players_must_be_ready_before_cards_are_dealt(self):
         alice = self.engine.get_player("a")

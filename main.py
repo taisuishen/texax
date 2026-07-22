@@ -37,6 +37,7 @@ async def lifespan(app: FastAPI):
         max_players=table_cfg["max_players"],
         dealer_image=table_cfg.get("dealer_image", ""),
     )
+    game_engine.single_player_idle_timeout = config.SINGLE_PLAYER_IDLE_TIMEOUT
     async def save_player_chips(user_id, chips):
         user_data = await redis_client.get_user(user_id)
         if user_data:

@@ -286,14 +286,44 @@ body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #1a1a
     padding: 12px 20px; display: flex; gap: 10px; justify-content: center; z-index: 100;
 }
 
-.raise-slider {
-    display: flex; align-items: center; gap: 10px; justify-content: center; margin-top: 10px;
+.raise-panel {
+    position: fixed; right: 18px; bottom: 76px; z-index: 180; width: 270px;
+    padding: 14px; border: 1px solid #315aa5; border-radius: 18px;
+    background: linear-gradient(180deg, rgba(26,58,121,.98), rgba(12,30,73,.98));
+    box-shadow: 0 12px 36px rgba(0,0,0,.55), inset 0 0 18px rgba(56,131,255,.18);
+    flex-direction: column; gap: 10px;
 }
-.raise-slider input[type=range] { width: 200px; accent-color: #f39c12; }
-.raise-slider input[type=number] {
-    width: 90px; padding: 6px; background: #0f3460; border: 1px solid #555;
-    color: #fff; border-radius: 6px; text-align: center;
+.raise-panel-header { display: flex; align-items: center; justify-content: space-between; color: #a9c9ff; font-size: 13px; }
+.raise-close { border: 0; background: transparent; color: #dbe8ff; font-size: 24px; line-height: 1; cursor: pointer; }
+.raise-amount-display { color: #fff; font-size: 32px; line-height: 1; text-align: center; font-weight: 800; }
+.raise-panel-controls { display: flex; gap: 12px; min-height: 222px; }
+.raise-presets { display: flex; flex: 1; flex-direction: column; gap: 7px; }
+.raise-preset {
+    flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    border: 1px solid #2677d9; border-radius: 13px; background: linear-gradient(180deg,#164f9f,#0d3478); color: #fff;
+    padding: 7px 12px; font-size: 13px; white-space: nowrap; cursor: pointer;
 }
+.raise-preset strong { color: #f5c849; font-size: 12px; }
+.raise-preset:hover, .raise-preset.selected {
+    border-color: #f0c340; background: linear-gradient(180deg,#2471c9,#15509d); box-shadow: 0 0 10px rgba(240,195,64,.3);
+}
+.raise-range-wrap { display: flex; width: 34px; justify-content: center; align-items: center; }
+.raise-panel input[type=range] {
+    width: 210px; height: 28px; accent-color: #f0a500;
+    writing-mode: vertical-lr; direction: rtl;
+}
+.raise-stepper { display: grid; grid-template-columns: 42px 1fr 42px; align-items: center; gap: 7px; }
+.raise-stepper button {
+    height: 36px; border: 1px solid #2677d9; border-radius: 50%; background: #123d80; color: #fff;
+    font-size: 22px; cursor: pointer;
+}
+.raise-stepper span { text-align: center; color: #9cb8e8; font-size: 12px; }
+.raise-exact-label { display: flex; align-items: center; justify-content: space-between; color: #9cb8e8; font-size: 12px; }
+.raise-panel input[type=number] {
+    width: 118px; padding: 7px; background: #091d48; border: 1px solid #3765ad;
+    color: #fff; border-radius: 7px; text-align: center; font-size: 15px;
+}
+.raise-confirm { width: 100%; border-radius: 14px; }
 
 /* 摊牌结果 */
 .showdown-overlay {
@@ -504,9 +534,21 @@ body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #1a1a
     .seat-actions { padding: 8px 10px max(8px, env(safe-area-inset-bottom)); }
     .seat-actions .btn-action { padding: 8px 16px; font-size: 13px; }
 
-    .raise-slider { flex-wrap: wrap; gap: 6px; }
-    .raise-slider input[type=range] { width: 140px; }
-    .raise-slider input[type=number] { width: 70px; }
+    .raise-panel {
+        left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right));
+        bottom: calc(58px + env(safe-area-inset-bottom)); width: auto; padding: 11px; gap: 8px;
+        border-radius: 16px;
+    }
+    .raise-amount-display { font-size: 26px; }
+    .raise-panel-controls { flex-direction: column; min-height: 0; gap: 8px; }
+    .raise-presets { flex-direction: row; width: 100%; gap: 5px; }
+    .raise-preset { min-height: 48px; padding: 5px 6px; font-size: 11px; flex-direction: column; gap: 2px; }
+    .raise-preset strong { font-size: 10px; }
+    .raise-range-wrap { width: 100%; height: 26px; }
+    .raise-panel input[type=range] { width: 100%; height: 26px; writing-mode: horizontal-tb; direction: ltr; }
+    .raise-stepper { grid-template-columns: 38px 1fr 38px; }
+    .raise-stepper button { height: 34px; }
+    .raise-panel input[type=number] { width: 105px; }
 
     /* 座位计时器 */
     .seat-timer { width: 56px; top: -36px; }
@@ -518,7 +560,25 @@ body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #1a1a
     .result-item { padding: 8px; }
 
     /* 聊天 */
-    .chat-panel { width: 100%; }
+    .chat-panel {
+        top: auto; left: auto;
+        right: max(8px, env(safe-area-inset-right));
+        bottom: max(8px, env(safe-area-inset-bottom));
+        width: min(420px, calc(100vw - 16px));
+        height: min(66dvh, 560px);
+        border: 1px solid #3b4762; border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 14px 45px rgba(0,0,0,.62);
+    }
+    .chat-header { position: relative; padding: 18px 14px 9px; }
+    .chat-header::before {
+        content: ''; position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+        width: 42px; height: 4px; border-radius: 4px; background: #66728c;
+    }
+    .last-hand-summary { margin: 8px; padding: 8px; max-height: 92px; overflow-y: auto; }
+    .chat-messages { padding: 8px; }
+    .quick-chat { padding: 5px 7px; }
+    .chat-input-area { padding: 7px; }
     .profile-avatar-picker { grid-template-columns: repeat(4, 52px); }
 }
 
@@ -632,4 +692,9 @@ body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background: #1a1a
     .my-cards-area .card { width: 42px; height: 60px; }
     .action-bar, .seat-actions { padding: 6px 8px max(6px, env(safe-area-inset-bottom)); }
     .btn-action { padding: 7px 12px; font-size: 12px; }
+    .chat-panel {
+        top: 46px; right: max(8px, env(safe-area-inset-right));
+        bottom: max(8px, env(safe-area-inset-bottom));
+        left: auto; width: min(340px, 44vw); height: auto;
+    }
 }

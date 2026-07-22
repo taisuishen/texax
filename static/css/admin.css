@@ -72,6 +72,9 @@ td button {
 }
 td button.btn-del { background: #e74c3c; color: #fff; }
 td button.btn-del:hover { background: #c0392b; }
+td button.btn-edit { background: #3498db; color: #fff; }
+td button.btn-edit:hover { background: #2980b9; }
+.user-actions { white-space: nowrap; }
 
 #server-status {
     background: #0f3460; padding: 12px; border-radius: 8px; margin-bottom: 10px;

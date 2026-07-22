@@ -1,7 +1,7 @@
 """
 Pydantic 数据模型
 """
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AdminLoginRequest(BaseModel):
@@ -19,6 +19,11 @@ class CreateUserRequest(BaseModel):
 class AddChipsRequest(BaseModel):
     user_id: str
     amount: int
+
+
+class SetChipsRequest(BaseModel):
+    user_id: str
+    chips: int = Field(ge=0)
 
 
 class UpdateTableConfigRequest(BaseModel):

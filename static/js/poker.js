@@ -177,6 +177,9 @@ function handleGameState(state, userInfo) {
         reactionExpiresAt = 0;
         simulateDealerDeal(state);
     }
+    if (state.event === 'single_player_idle') {
+        showToast('单人等待超时，座位已自动释放');
+    }
     const rebuyModal = document.getElementById('rebuy-modal');
     if (myPlayer && myPlayer.pending_rebuy) {
         document.getElementById('rebuy-description').textContent =
@@ -430,6 +433,8 @@ function renderActions(state) {
     const actionBar = document.getElementById('action-bar');
     const seatActions = document.getElementById('seat-actions');
     const myP = state.players.find(p => p.user_id === userId);
+    const readyBtn = document.getElementById('btn-ready');
+    const standBtn = document.getElementById('btn-standup');
 
     if (!myP) {
         actionBar.style.display = 'none';
@@ -437,11 +442,18 @@ function renderActions(state) {
         return;
     }
 
+    readyBtn.style.display = '';
+    standBtn.style.display = '';
+
     if (state.phase === 'settling') {
         actionBar.style.display = 'none';
+        if (state.players.length === 1) {
+            seatActions.style.display = '';
+            readyBtn.style.display = 'none';
+            return;
+        }
         if (myP && !myP.is_ready && !myP.pending_rebuy && myP.chips > 0) {
             seatActions.style.display = '';
-            const readyBtn = document.getElementById('btn-ready');
             readyBtn.textContent = '准备加入下一手';
             readyBtn.style.background = '#2ecc71';
         } else {
@@ -453,7 +465,6 @@ function renderActions(state) {
     if (state.phase === 'waiting') {
         actionBar.style.display = 'none';
         seatActions.style.display = '';
-        const readyBtn = document.getElementById('btn-ready');
         readyBtn.textContent = myP.is_ready ? '取消准备' : '准备';
         readyBtn.style.background = myP.is_ready ? '#e67e22' : '#2ecc71';
         return;
@@ -467,6 +478,7 @@ function renderActions(state) {
         const raiseEl = document.getElementById('raise-slider');
         btnsEl.innerHTML = '';
         raiseEl.style.display = 'none';
+        document.body.classList.remove('raise-panel-open');
 
         state.actions.forEach(a => {
             const btn = document.createElement('button');
@@ -485,17 +497,10 @@ function renderActions(state) {
             } else if (a.action === 'raise') {
                 btn.className += ' btn-raise';
                 btn.onclick = () => {
-                    raiseEl.style.display = raiseEl.style.display === 'none' ? 'flex' : 'none';
-                    const rangeEl = document.getElementById('raise-range');
-                    const inputEl = document.getElementById('raise-input');
-                    rangeEl.min = a.min;
-                    rangeEl.max = a.max;
-                    rangeEl.value = a.min;
-                    inputEl.min = a.min;
-                    inputEl.max = a.max;
-                    inputEl.value = a.min;
-                    rangeEl.oninput = () => { inputEl.value = rangeEl.value; };
-                    inputEl.oninput = () => { rangeEl.value = inputEl.value; };
+                    const opening = raiseEl.style.display === 'none';
+                    raiseEl.style.display = opening ? 'flex' : 'none';
+                    document.body.classList.toggle('raise-panel-open', opening);
+                    configureRaiseControls(a, state, myP);
                 };
             } else if (a.action === 'allin') {
                 btn.className += ' btn-allin';
@@ -509,11 +514,105 @@ function renderActions(state) {
     }
 }
 
+function normalizeRaiseAmount(value, min, max, step) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return min;
+    const stepped = min + Math.round((numeric - min) / step) * step;
+    return Math.max(min, Math.min(max, stepped));
+}
+
+function updateRaisePresetSelection(value) {
+    document.querySelectorAll('.raise-preset').forEach(button => {
+        button.classList.toggle('selected', Number(button.dataset.amount) === Number(value));
+    });
+}
+
+function setRaiseAmount(value) {
+    const rangeEl = document.getElementById('raise-range');
+    const inputEl = document.getElementById('raise-input');
+    const min = Number(inputEl.min);
+    const max = Number(inputEl.max);
+    const step = Number(inputEl.step) || 1;
+    const amount = normalizeRaiseAmount(value, min, max, step);
+    rangeEl.value = amount;
+    inputEl.value = amount;
+    document.getElementById('raise-amount-display').textContent = amount.toLocaleString();
+    updateRaisePresetSelection(amount);
+}
+
+function adjustRaiseBy(direction) {
+    const inputEl = document.getElementById('raise-input');
+    const step = Number(inputEl.step) || 1;
+    setRaiseAmount(Number(inputEl.value) + Number(direction) * step);
+}
+
+function closeRaisePanel() {
+    document.getElementById('raise-slider').style.display = 'none';
+    document.body.classList.remove('raise-panel-open');
+}
+
+function configureRaiseControls(action, state, myPlayer) {
+    const rangeEl = document.getElementById('raise-range');
+    const inputEl = document.getElementById('raise-input');
+    const presetsEl = document.getElementById('raise-presets');
+    const min = Math.min(Number(action.min), Number(action.max));
+    const max = Number(action.max);
+    const step = Math.max(1, Number(state.big_blind) || 1);
+
+    rangeEl.min = min;
+    rangeEl.max = max;
+    rangeEl.step = step;
+    inputEl.min = min;
+    inputEl.max = max;
+    inputEl.step = step;
+
+    const callAmount = Math.max(0, Number(state.current_bet) - Number(myPlayer.current_bet));
+    const potAfterCall = Number(state.main_pot) + callAmount;
+    const candidates = [
+        ['全押', max],
+        ['满池', Number(state.current_bet) + potAfterCall],
+        ['2/3池', Number(state.current_bet) + potAfterCall * (2 / 3)],
+        ['1/2池', Number(state.current_bet) + potAfterCall * 0.5],
+        ['最小', min],
+    ];
+
+    presetsEl.innerHTML = '';
+    const seenAmounts = new Set();
+    for (const [label, rawAmount] of candidates) {
+        const amount = normalizeRaiseAmount(rawAmount, min, max, step);
+        if (seenAmounts.has(amount)) continue;
+        seenAmounts.add(amount);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'raise-preset';
+        button.dataset.amount = amount;
+        button.innerHTML = `<span>${label}</span><strong>${amount.toLocaleString()}</strong>`;
+        button.onclick = () => setRaiseAmount(amount);
+        presetsEl.appendChild(button);
+    }
+
+    rangeEl.oninput = () => {
+        inputEl.value = rangeEl.value;
+        document.getElementById('raise-amount-display').textContent = Number(rangeEl.value).toLocaleString();
+        updateRaisePresetSelection(rangeEl.value);
+    };
+    inputEl.oninput = () => {
+        document.getElementById('raise-amount-display').textContent = (Number(inputEl.value) || 0).toLocaleString();
+        updateRaisePresetSelection(inputEl.value);
+    };
+    inputEl.onchange = () => setRaiseAmount(inputEl.value);
+    inputEl.onfocus = () => inputEl.select();
+    setRaiseAmount(min);
+}
+
 function doRaise() {
-    const val = parseInt(document.getElementById('raise-input').value);
-    if (val) {
-        wsSend({ type: 'action', action: 'raise', amount: val });
-        document.getElementById('raise-slider').style.display = 'none';
+    const inputEl = document.getElementById('raise-input');
+    const val = Number(inputEl.value);
+    if (Number.isFinite(val) && val >= Number(inputEl.min) && val <= Number(inputEl.max)) {
+        wsSend({ type: 'action', action: 'raise', amount: Math.round(val) });
+        closeRaisePanel();
+    } else {
+        showToast(`请输入 ${inputEl.min} 到 ${inputEl.max} 之间的加注额`);
     }
 }
 

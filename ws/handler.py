@@ -211,6 +211,9 @@ class ConnectionManager:
         msg_type = data.get("type", "")
         engine = self.game_engine
 
+        if msg_type != "get_state":
+            engine.touch_single_player_activity(user_id)
+
         if msg_type == "sit_down":
             seat = data.get("seat", -1)
             user_data = await redis_client.get_user(user_id)
@@ -218,9 +221,6 @@ class ConnectionManager:
                 await self.send_personal(user_id, {"type": "error", "message": "用户数据不存在"})
                 return
             chips = user_data.get("chips", 0)
-            if chips <= 0:
-                await self.send_personal(user_id, {"type": "error", "message": "余额不足，请联系管理员充值"})
-                return
 
             player = engine.get_player(user_id)
             if player:
@@ -254,7 +254,9 @@ class ConnectionManager:
                     await redis_client.save_user(user_id, player_data)
             ok = engine.stand_up(user_id)
             if ok:
-                await self.broadcast_game_state("player_leave")
+                reset = await engine.reset_if_insufficient_players()
+                if not reset:
+                    await self.broadcast_game_state("player_leave")
             else:
                 await self.send_personal(user_id, {"type": "error", "message": "准备后座位已锁定；请先取消准备，或在游戏中选择本手后离桌"})
 
